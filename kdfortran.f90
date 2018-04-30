@@ -22,11 +22,11 @@ PROGRAM kdfortran
 	REAL(8) :: start,finish
 	
 	N=102400						! Number of particles
-	dt=1d-19						! Time step in seconds
+	dt=1d-17						! Time step in seconds
 	D=125d-6						! Laser beam waist in meters
 	zimp=24d-2+D						! Distance from laser to screen in meters
 	v0=1.1d7						! Electron velocity
-	E0=8.5d8  						! Laser electric field
+	E0=8.9d8  						! Laser electric field
 	Ezpf=0d0						! ZPF electric field (?)
 	!E0=0
 	
