@@ -22,12 +22,12 @@ PROGRAM kdfortran
 	REAL(8) :: start,finish
 	
 	N=102400						! Number of particles
-	dt=1d-17						! Time step in seconds
+	dt=1d-17					! Time step in seconds
 	D=125d-6						! Laser beam waist in meters
 	zimp=24d-2+D						! Distance from laser to screen in meters
 	v0=1.1d7						! Electron velocity
-	E0=8.9d8  						! Laser electric field
-	Ezpf=0d0						! ZPF electric field (?)
+	E0=2d8							! Laser electric field
+	Ezpf=E0/1d2						! ZPF electric field
 	!E0=0
 	
 	1 FORMAT(E18.10,',',E18.10,',',E18.10) !Must be an 8-digit difference between the number after the E and the number of digits after the decimal dot
@@ -36,8 +36,13 @@ PROGRAM kdfortran
 	3 FORMAT(E18.10) ! Screen
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	PRINT*,"-------------------------------------------------------------"
-	PRINT*,"N=",N,"particles that reach the screen at z=",zimp,"m"
-	PRINT*,"E_L=",E0,"V/m and dt=",dt,"s"
+	PRINT*,"N=",N,"particles"
+	PRINT*,"E0L=",E0L,"V/m"
+	PRINT*,"E0zpf=",E0zpf,"V/m"
+	PRINT*,"dt=",dt,"s"
+	PRINT*,"v0=",u,"m/s"
+	PRINT*,"zscreen=",zscreen,"m"
+
 !	PRINT*,"zimp=",zimp
 !	PRINT*,"v0=",v0
 !	PRINT*,"dt=",dt
