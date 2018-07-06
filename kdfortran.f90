@@ -1,13 +1,15 @@
 PROGRAM kdfortran
 	IMPLICIT NONE
 	
-	INTEGER :: i,j,k,N
+	INTEGER :: i,j,k,N,Nk
 !	INTEGER(4) :: rows
-	REAL(8) :: dt,D,zimp,v0,E0L,E0zpf
+	REAL(8) :: dt,D,zimp,v0,wL,Damping,Delta,E0L,E0zpf
 	!REAL(8), DIMENSION(3*N) :: phi
 	!REAL(8), DIMENSION(N,3) :: ang ! Table of randomly generated numbers (cols 1 and 2 from uniform and 3 from normal distribution)
-	REAL(8), ALLOCATABLE :: phi(:)
-	REAL(8), ALLOCATABLE :: ang(:,:)
+	REAL(8), ALLOCATABLE :: init(:)
+        REAL(8), ALLOCATABLE :: theta(:)
+        REAL(8), ALLOCATABLE :: phi(:)
+        REAL(8), ALLOCATABLE :: ki(:)
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! %%%%%%%%%%% IF YOU WANT TO RECORD THE COMPLETE POSITIONS, UNCOMMENT %%%%%%%%%%%%%%
 ! %%%%%%%%%%%%%%%%%%%%%%%%% MARKED BY THIS DELIMITERS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
