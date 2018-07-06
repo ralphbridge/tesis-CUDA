@@ -3,7 +3,7 @@ PROGRAM kdfortran
 	
 	INTEGER :: i,j,k,N
 !	INTEGER(4) :: rows
-	REAL(8) :: dt,D,zimp,v0,E0,Ezpf
+	REAL(8) :: dt,D,zimp,v0,E0L,E0zpf
 	!REAL(8), DIMENSION(3*N) :: phi
 	!REAL(8), DIMENSION(N,3) :: ang ! Table of randomly generated numbers (cols 1 and 2 from uniform and 3 from normal distribution)
 	REAL(8), ALLOCATABLE :: phi(:)
@@ -21,13 +21,13 @@ PROGRAM kdfortran
 	LOGICAL :: e
 	REAL(8) :: start,finish
 	
-	N=102400						! Number of particles
+	N=10240						! Number of particles
 	dt=1d-17					! Time step in seconds
 	D=125d-6						! Laser beam waist in meters
 	zimp=24d-2+D						! Distance from laser to screen in meters
 	v0=1.1d7						! Electron velocity
-	E0=2d8							! Laser electric field
-	Ezpf=E0/1d2						! ZPF electric field
+	E0L=8.3d8							! Laser electric field
+	E0zpf=E0L/1d2						! ZPF electric field
 	!E0=0
 	
 	1 FORMAT(E18.10,',',E18.10,',',E18.10) !Must be an 8-digit difference between the number after the E and the number of digits after the decimal dot
@@ -40,8 +40,8 @@ PROGRAM kdfortran
 	PRINT*,"E0L=",E0L,"V/m"
 	PRINT*,"E0zpf=",E0zpf,"V/m"
 	PRINT*,"dt=",dt,"s"
-	PRINT*,"v0=",u,"m/s"
-	PRINT*,"zscreen=",zscreen,"m"
+	PRINT*,"v0=",v0,"m/s"
+	PRINT*,"zscreen=",zimp,"m"
 
 !	PRINT*,"zimp=",zimp
 !	PRINT*,"v0=",v0
@@ -77,7 +77,7 @@ PROGRAM kdfortran
 	END IF
 
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-	CALL kernel_wrapper(phi,pos,N,dt,D,zimp,v0,E0,Ezpf) ! Without
+	CALL kernel_wrapper(phi,pos,N,dt,D,zimp,v0,E0L,E0zpf) ! Without
 	!CALL kernel_wrapper(phi,pos,posy,posz,rows,N,dt,D,zimp,v0,E0) ! With
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

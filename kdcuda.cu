@@ -151,7 +151,8 @@ __global__ void particle_path(double *ang, double *pos, int N) // Without
 		//printf("yf=%f\n",yi);
 		//printf("zf=%f\n",zi);
 		yi=yi+(ctes_d[26]-ctes_d[25])*vyi/vzi;
-		atomicAdd(&(pos[idx]), yi); // Impact positions
+		//atomicAdd(&(pos[idx]), yi); // Impact positions
+		pos[idx]=yi;
 	}
 }
 
@@ -185,7 +186,8 @@ __global__ void kernel(double *N, curandState* globalState, int n)
 	{
 		double number = generate(globalState, id);
 		//printf("%f for %i\n", number,id);
-		atomicAdd(&(N[id]), number);
+		//atomicAdd(&(N[id]), number);
+		N[id]=number;
 	}
 }
 
