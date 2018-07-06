@@ -31,16 +31,25 @@ PROGRAM kdfortran
 	E0L=8.3d8							! Laser electric field
 	E0zpf=E0L/1d2						! ZPF electric field
 	!E0=0
+        Damping=6.245835d-24
+        Delta=Damping*(wL**2d0)
+        Nk=100
+        PRINT*,"Delta=",Delta,"1/2"
+
+        ALLOCATE(theta(Nk))
+        ALLOCATE(phi(Nk))
+        ALLOCATE(ki(Nk))
 	
-	1 FORMAT(E18.10,',',E18.10,',',E18.10) !Must be an 8-digit difference between the number after the E and the number of digits after the decimal dot
+	1 FORMAT(E18.10) !Must be an 8-digit difference between the number after the E and the number of digits after the decimal dot
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	!2 FORMAT(<2*N>E11.3) ! Trajectories
-	3 FORMAT(E18.10) ! Screen
+	!3 FORMAT(E18.10) ! Screen
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	PRINT*,"-------------------------------------------------------------"
 	PRINT*,"N=",N,"particles"
 	PRINT*,"E0L=",E0L,"V/m"
 	PRINT*,"E0zpf=",E0zpf,"V/m"
+        PRINT*,"Nk=",Nk,"modes"
 	PRINT*,"dt=",dt,"s"
 	PRINT*,"v0=",v0,"m/s"
 	PRINT*,"zscreen=",zimp,"m"
@@ -52,8 +61,8 @@ PROGRAM kdfortran
 !	PRINT*,"zimp/(v0*dt)=",zimp/(v0*dt)
 !	rows=DINT(zimp/(v0*dt))
 !	PRINT*,"rows=",rows
-	ALLOCATE(phi(3*N))
-	ALLOCATE(ang(N,3))
+	!ALLOCATE(phi(3*N))
+	!ALLOCATE(ang(N,3))
 	ALLOCATE(pos(N))
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	!ALLOCATE(posy(rows*N)) ! Y-components for the positions
@@ -79,7 +88,7 @@ PROGRAM kdfortran
 	END IF
 
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-	CALL kernel_wrapper(phi,pos,N,dt,D,zimp,v0,E0L,E0zpf) ! Without
+	CALL kernel_wrapper(init,pos,N,Nk,theta,phi,ki,dt,D,zimp,v0,wL,Delta,Nk,E0L,E0zpf) ! Without
 	!CALL kernel_wrapper(phi,pos,posy,posz,rows,N,dt,D,zimp,v0,E0) ! With
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
