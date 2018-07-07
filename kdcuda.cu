@@ -158,34 +158,36 @@ __global__ void particle_path(double *ang, double *pos, int N) // Without
 }
 
 // random initialization
-__device__ double generate( curandState * globalState, int ind)
+__device__ double generate( curandState * globalState, int ind, bool i)
 {
 	//int ind = threadIdx.x;
 	curandState localState = globalState[ind];
 	double RANDOM = 0.0;
-	if (((ind+1)%3)==0)
+	if (i==0)
 	{
-		RANDOM = (15e-6)*curand_normal( &localState );
+		//RANDOM = (15e-6)*curand_normal( &localState );
 		//RANDOM = 1e-4;
+		RANDOM = cos((2.0*curand_uniform( &localState )-0.5));
 	} else {
-		RANDOM = 2.0*3.141592*(curand_uniform( &localState )-0.5);
+		//RANDOM = 2.0*3.141592*(curand_uniform( &localState )-0.5);
+		RANDOM = 2.0*3.141592*cudand_uniform( &localState );
 	}
 	globalState[ind] = localState;
 	return RANDOM;
 }
 
-__global__ void setup_angles ( curandState * state, unsigned long seed )
+__global__ void setup_kernels ( curandState * state, unsigned long seed )
 {
 	int id = threadIdx.x+BLOCK_SIZE*blockIdx.x;
 	curand_init ( seed, id, 0, &state[id] );
 }
 
-__global__ void kernel(double *N, curandState* globalState, int n)
+__global__ void kernel_ang (double *N, curandState* globalState, int n, bool i)
 {
 	int id = threadIdx.x + blockIdx.x * blockDim.x;
-	if (id<3*n)
+	if (id<n)
 	{
-		double number = generate(globalState, id);
+		double number = generate(globalState, id, i);
 		//printf("%f for %i\n", number,id);
 		//atomicAdd(&(N[id]), number);
 		N[id]=number;
@@ -279,11 +281,11 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 	// theta random generation
 	cudaMemcpy(theta_d, theta, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
-	kernel_t<<<blocks,TPB>>> (theta_d, devStates, *Nk);
+	kernel_ang<<<blocks,TPB>>> (theta_d, devStates, *Nk, 0);
 
 	// phi random generation
 	cudaMemcpy(phi_d, phi, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
-	kernel_p<<<blocks,TPB>>> (phi_d, devStates, *Nk);
+	kernel_ang<<<blocks,TPB>>> (phi_d, devStates, *Nk, 1);
 
 	// ki generation
 	cudaMemcpy(ki_d, ki, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
