@@ -76,7 +76,7 @@ __device__ double g(double eta1, double eta2, double t, double y, double z , dou
 }
 
 // this kernel computes the trajectory of a single electron
-__global__ void particle_path(double *theta, double *phi, double *k, double *init, double *pos, int N) // Without
+__global__ void particle_path(double *theta, double *phi, double *k, double *init, double *pos, int N, int Nk) // Without
 //__global__ void particle_path(double *ang, double *pos, double *posy, double *posz, int rows, int N) // With
 {
 	int idx=threadIdx.x+TPB*blockIdx.x;
@@ -265,6 +265,10 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	double *init_d, *pos_d;
 	double *theta_d, *phi_d, *k_d; // Without
 	double Dkappa;
+	Dkappa=(pow(ctes[15]+ctes[27]/2.0,3.0)-pow(ctes[15]-ctes[27]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression
+	Dkappa=Dkappa/((double)(*Nk)-1.0);
+	printf("Dkappa=%lf\n",Dkappa);
+
 	//double  *phi_d, *pos_d, *posy_d, *posz_d;   // With
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
@@ -314,7 +318,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 //////////////////////////////// k radii (not random) ///////////////////////////////
 	//Dkappa=1.0;
-	Dkappa=pow(ctes[15]+ctes[27]/2.0,3.0);
+	/*Dkappa=pow(ctes[15]+ctes[27]/2.0,3.0);
 	printf("Dkappa=%lf\n",Dkappa);
 	Dkappa=-pow(ctes[15]-ctes[27]/2.0,3.0);
 	printf("Dkappa=%lf\n",Dkappa);
@@ -324,7 +328,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	Dkappa=(pow(ctes[15]+ctes[27]/2.0,3.0)-pow(ctes[15]-ctes[27]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression
 	printf("Dkappa=%lf\n",Dkappa);
 	Dkappa=Dkappa/((double)(*Nk)-1.0);
-	printf("Dkappa=%lf\n",Dkappa);
+	printf("Dkappa=%lf\n",Dkappa);*/
 
 	cudaMemcpy(k_d, k, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
 	kernel_k<<<blocks,TPB>>> (k_d, Dkappa, *Nk);
@@ -366,7 +370,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	//cudaMemcpy( posz_d, posz, (*rows) * sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Trajectories z
 	cudaMemcpy( pos_d, pos, sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Impact positions
 
-//2	//particle_path<<<blocks,TPB>>>(phi_d,pos_d,*Np); // Without
+//2	//particle_path<<<blocks,TPB>>>(theta_d,phi_d,k_d,init_d,pos_d,*Np,*Nk); // Without
 	//particle_path<<<blocks,N>>>(phi_d,pos_d,posy_d,posz_d,*rows,*Np); // With
 
    // copy vectors back from GPU to CPU
