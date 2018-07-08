@@ -41,7 +41,7 @@ ctes[25] D
 ctes[26] zimp
 ctes[27] Delta
 */
-double ctes[27];
+double ctes[28];
 
 __device__ double f(double eta1, double eta2, double t, double y, double z , double vz)
 {
@@ -75,16 +75,16 @@ __device__ double g(double eta1, double eta2, double t, double y, double z , dou
 	return result;
 }
 
-// this kernel uses RK4 to calculate the trajectory of a single electron
-__global__ void particle_path(double *ang, double *pos, int N) // Without
+// this kernel computes the trajectory of a single electron
+__global__ void particle_path(double *theta, double *phi, double *k, double *init, double *pos, int N) // Without
 //__global__ void particle_path(double *ang, double *pos, double *posy, double *posz, int rows, int N) // With
 {
-	int idx=threadIdx.x+BLOCK_SIZE*blockIdx.x;
+	int idx=threadIdx.x+TPB*blockIdx.x;
 	//printf("idx=%d\n",idx);
 	//printf("N=%d\n",N);
 	if (idx<N){
 		double ti=0.0;
-		double yi=ang[3*idx+2];
+		double yi=init[idx];
 		double zi=0.0;
 		double vyi=0.0;
 		double vzi=ctes_d[5];
@@ -128,8 +128,8 @@ __global__ void particle_path(double *ang, double *pos, int N) // Without
 			//zii=zi+ctes_d[24]*vzi+powf(ctes_d[24],2.0)*(kvz1+kvz2+kvz3)/6.0;
 
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Using Euler %%%%%%%%%%%%%%%%%%%%% */
-			vyii=vyi+ctes_d[24]*f(ang[3*idx],ang[3*idx+1],ti,yi,zi,vzi);
-			vzii=vzi+ctes_d[24]*g(ang[3*idx],ang[3*idx+1],ti,yi,zi,vyi);
+			vyii=vyi+ctes_d[24]*f(theta[3*idx],phi[3*idx+1],ti,yi,zi,vzi);
+			vzii=vzi+ctes_d[24]*g(theta[3*idx],phi[3*idx+1],ti,yi,zi,vyi);
 			
 			yii=yi+ctes_d[24]*vyi;
 			zii=zi+ctes_d[24]*vzi;
@@ -158,19 +158,23 @@ __global__ void particle_path(double *ang, double *pos, int N) // Without
 }
 
 // random initialization
-__device__ double generate( curandState * globalState, int ind, bool i)
+__device__ double generate( curandState * globalState, int ind, int i=0 )
 {
 	//int ind = threadIdx.x;
 	curandState localState = globalState[ind];
 	double RANDOM = 0.0;
-	if (i==0)
+	if (i==1)
 	{
 		//RANDOM = (15e-6)*curand_normal( &localState );
 		//RANDOM = 1e-4;
 		RANDOM = cos((2.0*curand_uniform( &localState )-0.5));
-	} else {
+	} else if (i==2)
+	{
 		//RANDOM = 2.0*3.141592*(curand_uniform( &localState )-0.5);
-		RANDOM = 2.0*3.141592*cudand_uniform( &localState );
+		RANDOM = 2.0*3.141592*curand_uniform( &localState );
+	} else
+	{
+		RANDOM = (15e-6)*curand_normal( &localState );
 	}
 	globalState[ind] = localState;
 	return RANDOM;
@@ -178,24 +182,47 @@ __device__ double generate( curandState * globalState, int ind, bool i)
 
 __global__ void setup_kernels ( curandState * state, unsigned long seed )
 {
-	int id = threadIdx.x+BLOCK_SIZE*blockIdx.x;
+	int id = threadIdx.x + TPB * blockIdx.x;
 	curand_init ( seed, id, 0, &state[id] );
 }
 
-__global__ void kernel_ang (double *N, curandState* globalState, int n, bool i)
+__global__ void kernel_ang ( double *N, curandState* globalState, int n, int i )
 {
-	int id = threadIdx.x + blockIdx.x * blockDim.x;
+	int id = threadIdx.x + TPB * blockIdx.x;
 	if (id<n)
 	{
 		double number = generate(globalState, id, i);
 		//printf("%f for %i\n", number,id);
 		//atomicAdd(&(N[id]), number);
-		N[id]=number;
+		N[id] = number;
+	}
+}
+__device__ double genKappa ( double Dk, int i )
+{
+	double kappa=0.0;
+	kappa=pow(ctes_d[15]-ctes_d[27]/2.0,3.0)/(3*(pow(ctes_d[4],3.0)))+(i-1)*Dk;
+	return kappa;
+}
+
+__global__ void kernel_k ( double *k, double Dkappa, int n )
+{
+	int id = threadIdx.x + TPB * blockIdx.x;
+	double kappa=genKappa(Dkappa,id);
+	k[id]=pow(3*kappa,1.0/3.0);
+}
+
+__global__ void kernel_i ( double *init, curandState* globalState , int n)
+{
+	int id = threadIdx.x + TPB * blockIdx.x;
+	if (id<n)
+	{
+		double number = generate(globalState, id);
+		init[id] = number;
 	}
 }
 
 // function called from main fortran program
-extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *theta, double *phi, double *ki, double *dt, double *D, double *zimp, double *v0, double *wL, double *Delta, int *Nk, double *E0L, double *E0zpf) // Should I provide this variables as pointers or not?
+extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *theta, double *phi, double *k, double *dt, double *D, double *zimp, double *v0, double *wL, double *Delta, int *Nk, double *E0L, double *E0zpf) // Should I provide this variables as pointers or not?
 //extern "C" void kernel_wrapper_(double *phi, double *pos, double *posy, double *posz, int *rows, int *Np, double *dt, double *D, double *zimp, double *v0, double *E0) // Should I provide this variables as pointers or not?
 {
 	ctes[0]=3.1415926535; // PI
@@ -224,8 +251,8 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	ctes[20]=ctes[6]*ctes[19]; // k_B Laser
 	ctes[21]=2.0*ctes[0]/ctes[18]; // lambda_Laser ~ 532 nm
 	
-	ctes[22]=*E0; // E0 laser
-	ctes[23]=*Ezpf; // E0 ZPF
+	ctes[22]=*E0L; // E0 laser
+	ctes[23]=*E0zpf; // E0 ZPF
 	ctes[24]=*dt; // time step
 	ctes[25]=*D; // laser beam waist
 	ctes[26]=*zimp; // distance from laser to screen
@@ -236,12 +263,10 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 	double *init_d, *pos_d;
-	double *theta_d, *phi_d, *ki_d; // Without
+	double *theta_d, *phi_d, *k_d; // Without
 	double Dkappa;
 	//double  *phi_d, *pos_d, *posy_d, *posz_d;   // With
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
-
-	Dkappa=((pow(ctes[15]+ctes[27]/2.0,3.0)-pow(ctes[15]-ctes[27]/2.0,3.0))/(3.0*pow(ctes[4],3.0)))/(Nw-1.0); // <-------------- check this expression
 
 	/*printf("Np=%i\n",*Np);
 	printf("numerador=%i\n",3*(*Np));
@@ -258,14 +283,14 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	printf("Blocks per grid: %i\n",blocks); 
 	printf("Threads per block: %i\n",N);*/
    // Allocate memory on GPU
-	cudaMalloc( (void **)&init_d, sizeof(double) * (*Np) );
 	cudaMalloc( (void **)&theta_d, sizeof(double) * (*Nk) );
 	cudaMalloc( (void **)&phi_d, sizeof(double) * (*Nk) );
-	cudaMalloc( (void **)&ki_d, sizeof(double) * (*Nk) );
+	cudaMalloc( (void **)&k_d, sizeof(double) * (*Nk) );
 
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 	//cudaMalloc( (void **)&posy_d, (*rows) * sizeof(double) * (*Np)  ); // Trajectories y
 	//cudaMalloc( (void **)&posz_d, (*rows) * sizeof(double) * (*Np) ); // Trajectories z
+	cudaMalloc( (void **)&init_d, sizeof(double) * (*Np) );
 	cudaMalloc( (void **)&pos_d, sizeof(double) * (*Np) ); // Impact positions
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
@@ -281,18 +306,22 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 	// theta random generation
 	cudaMemcpy(theta_d, theta, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
-	kernel_ang<<<blocks,TPB>>> (theta_d, devStates, *Nk, 0);
+	kernel_ang<<<blocks,TPB>>> (theta_d, devStates, *Nk, 1);
 
 	// phi random generation
 	cudaMemcpy(phi_d, phi, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
-	kernel_ang<<<blocks,TPB>>> (phi_d, devStates, *Nk, 1);
+	kernel_ang<<<blocks,TPB>>> (phi_d, devStates, *Nk, 2);
 
-	// ki generation
-	cudaMemcpy(ki_d, ki, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
-	kernel_k<<<blocks,TPB>>> (ki_d, devStates, *Nk);
+//////////////////////////////// k radii (not random) ///////////////////////////////
+	//Dkappa=1.0;
+	Dkappa=((pow(ctes[15]+ctes[27]/2.0,3.0)-pow(ctes[15]-ctes[27]/2.0,3.0))/(3.0*pow(ctes[4],3.0))); // <-------------- check this expression
+	Dkappa=Dkappa/((double)(*Nk)-1.0);
+
+	cudaMemcpy(k_d, k, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
+	kernel_k<<<blocks,TPB>>> (k_d, Dkappa, *Nk);
 
 //////////////////////////////// RANDOM NUMBERS FOR INITIAL POSITION ///////////////////
-	curandState* devStates;
+	//curandState* devStates;
 	cudaMalloc ( &devStates, (*Np)*sizeof( curandState ) );
 
 	blocks = (int)ceil((double)(*Np)/TPB);
@@ -304,8 +333,13 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 	cudaMemcpy(init_d, init, sizeof(double) * (*Np), cudaMemcpyHostToDevice );
 	kernel_i<<<blocks,TPB>>> (init_d, devStates, *Np);
-	
-	// Paths
+
+// copy vectors back from GPU to CPU
+	cudaMemcpy( theta, theta_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
+	cudaMemcpy( phi, phi_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
+	cudaMemcpy( k, k_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
+
+////////////////////////////// PATHS ///////////////////////////////////////////
 
 	/*printf("\nNp=%i\n",*Np);
 	printf("numerador=%i\n",*Np);
@@ -314,37 +348,30 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	printf("ceil=%f\n",ceil((double)(*Np)/BLOCK_SIZE));
 	printf("ceil(int)=%i\n",(int)ceil((double)(*Np)/BLOCK_SIZE));*/
 
-	blocks = (int)ceil((double)(*Np)/BLOCK_SIZE);
-
 	/*printf("\nParticle Path\n");
 	printf("Blocks per grid: %i\n",blocks); 
 	printf("Threads per block: %i\n",N);*/
 
-/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 	//printf("\n%i\n",(*rows) * sizeof(double) * (*Np));
 	//cudaMemcpy( posy_d, posy, (*rows) * sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Trajectories y
 	//cudaMemcpy( posz_d, posz, (*rows) * sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Trajectories z
 	cudaMemcpy( pos_d, pos, sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Impact positions
 
-	particle_path<<<blocks,N>>>(phi_d,pos_d,*Np); // Without
+//2	//particle_path<<<blocks,TPB>>>(phi_d,pos_d,*Np); // Without
 	//particle_path<<<blocks,N>>>(phi_d,pos_d,posy_d,posz_d,*rows,*Np); // With
 
    // copy vectors back from GPU to CPU
-	cudaMemcpy( phi, phi_d, 3*sizeof(double) * (*Np), cudaMemcpyDeviceToHost );
-	
 	//cudaMemcpy( posy, posy_d, (*rows) * sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Trajectories y
 	//cudaMemcpy( posz, posz_d, (*rows) * sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Trajectories z
-	cudaMemcpy( pos, pos_d, sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Impact positions
-/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
-	
-
+	cudaMemcpy( init, init_d, sizeof(double) * (*Np), cudaMemcpyDeviceToHost );
+//3	cudaMemcpy( pos, pos_d, sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Impact positions
+   
    // free GPU memory
+	cudaFree(theta_d);
 	cudaFree(phi_d);
-/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */	
-	//cudaFree(posy_d); // Trajectories y
-	//cudaFree(posz_d); // Trajectories z
+	cudaFree(k_d);
+	cudaFree(init_d);
 	cudaFree(pos_d); // Impact positions
-/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */	
 	cudaFree(ctes_d);
 	return;
 }

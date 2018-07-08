@@ -1,21 +1,21 @@
 PROGRAM kdfortran
 	IMPLICIT NONE
 	
-	INTEGER :: i,j,k,N,Nk
+	INTEGER :: i,N,Nk
 !	INTEGER(4) :: rows
 	REAL(8) :: dt,D,zimp,v0,wL,Damping,Delta,E0L,E0zpf
 	!REAL(8), DIMENSION(3*N) :: phi
 	!REAL(8), DIMENSION(N,3) :: ang ! Table of randomly generated numbers (cols 1 and 2 from uniform and 3 from normal distribution)
-	REAL(8), ALLOCATABLE :: init(:)
         REAL(8), ALLOCATABLE :: theta(:)
         REAL(8), ALLOCATABLE :: phi(:)
-        REAL(8), ALLOCATABLE :: ki(:)
+        REAL(8), ALLOCATABLE :: k(:)
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! %%%%%%%%%%% IF YOU WANT TO RECORD THE COMPLETE POSITIONS, UNCOMMENT %%%%%%%%%%%%%%
 ! %%%%%%%%%%%%%%%%%%%%%%%%% MARKED BY THIS DELIMITERS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	!REAL(8), DIMENSION(N) :: pos ! Vector of the impact positions for each particle
-	REAL(8), ALLOCATABLE :: pos(:)
+	REAL(8), ALLOCATABLE :: init(:)
+        REAL(8), ALLOCATABLE :: pos(:)
 	!REAL(8), ALLOCATABLE :: posy(:),posz(:) ! Complete "vector" of the positions (y,z) for each particle
 	!REAL(8), ALLOCATABLE :: postab(:,:) ! Table formed from vectors "posy" and "posz"
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -38,9 +38,10 @@ PROGRAM kdfortran
 
         ALLOCATE(theta(Nk))
         ALLOCATE(phi(Nk))
-        ALLOCATE(ki(Nk))
+        ALLOCATE(k(Nk))
 	
 	1 FORMAT(E18.10) !Must be an 8-digit difference between the number after the E and the number of digits after the decimal dot
+        2 FORMAT(E18.10,',',E18.10,',',E18.10)
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	!2 FORMAT(<2*N>E11.3) ! Trajectories
 	!3 FORMAT(E18.10) ! Screen
@@ -63,6 +64,7 @@ PROGRAM kdfortran
 !	PRINT*,"rows=",rows
 	!ALLOCATE(phi(3*N))
 	!ALLOCATE(ang(N,3))
+        ALLOCATE(init(N))
 	ALLOCATE(pos(N))
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	!ALLOCATE(posy(rows*N)) ! Y-components for the positions
@@ -76,9 +78,9 @@ PROGRAM kdfortran
 		OPEN(20,FILE="input.txt",STATUS="old")
 		CLOSE(20,STATUS="delete")
 	END IF
-	INQUIRE(FILE='paths.txt',EXIST=e)
+	INQUIRE(FILE='k-vectors.txt',EXIST=e)
 	IF (e) THEN
-		OPEN(19,FILE="paths.txt",STATUS="old")
+		OPEN(19,FILE="k-vectors.txt",STATUS="old")
 		CLOSE(19,STATUS="delete")
 	END IF
 	INQUIRE(FILE='screen.txt',EXIST=e)
@@ -88,25 +90,32 @@ PROGRAM kdfortran
 	END IF
 
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-	CALL kernel_wrapper(init,pos,N,Nk,theta,phi,ki,dt,D,zimp,v0,wL,Delta,Nk,E0L,E0zpf) ! Without
+	CALL kernel_wrapper(init,pos,N,theta,phi,k,dt,D,zimp,v0,wL,Delta,Nk,E0L,E0zpf) ! Without
 	!CALL kernel_wrapper(phi,pos,posy,posz,rows,N,dt,D,zimp,v0,E0) ! With
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-	k=1
-	DO i=1,N
-		DO j=k,k+2
-			ang(i,j-k+1)=phi(j)
-		END DO
-		k=j
-	END DO
+!	k=1
+!	DO i=1,N
+!		DO j=k,k+2
+!			ang(i,j-k+1)=phi(j)
+!		END DO
+!		k=j
+!	END DO
 	
 	OPEN(20,FILE="input.txt",STATUS="new")
 	!PRINT*, 'phi = ', (phi(i), i=1,3*N)
-	DO i=1,N
-		!PRINT*, 'ang = ', (ang(i,j), j=1,3)
-		WRITE(20,1) (ang(i,j), j=1,3)
-	END DO
+!	DO i=1,N
+!		!PRINT*, 'ang = ', (ang(i,j), j=1,3)
+!		WRITE(20,1) (ang(i,j), j=1,3)
+!	END DO
+        WRITE(20,1) init
 	CLOSE(20)
+
+        OPEN(19,FILE="k-vectors.txt",STATUS="new")
+        DO i=1,Nk
+                WRITE(19,2) k(i),theta(i),phi(i)
+        END DO
+        CLOSE(19)
 	!PRINT*,"yi=",ang(1,3)
 	!PRINT*,"yf=",pos(1)
 	
@@ -126,7 +135,7 @@ PROGRAM kdfortran
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 	OPEN(18,FILE="screen.txt",STATUS="new")
-	WRITE(18,3) pos ! Impact positions
+	WRITE(18,1) pos ! Impact positions
 	CLOSE(18)
 	
 	CALL CPU_TIME(finish)
