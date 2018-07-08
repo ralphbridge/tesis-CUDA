@@ -314,8 +314,17 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 //////////////////////////////// k radii (not random) ///////////////////////////////
 	//Dkappa=1.0;
-	Dkappa=((pow(ctes[15]+ctes[27]/2.0,3.0)-pow(ctes[15]-ctes[27]/2.0,3.0))/(3.0*pow(ctes[4],3.0))); // <-------------- check this expression
+	Dkappa=pow(ctes[15]+ctes[27]/2.0,3.0);
+	printf("Dkappa=%lf\n",Dkappa);
+	Dkappa=-pow(ctes[15]-ctes[27]/2.0,3.0);
+	printf("Dkappa=%lf\n",Dkappa);
+	Dkappa=(3.0*pow(ctes[4],3.0));
+	printf("Dkappa=%lf\n",Dkappa);
+	printf("Dkappa=%lf\n",1/((double)(*Nk)-1.0));
+	Dkappa=(pow(ctes[15]+ctes[27]/2.0,3.0)-pow(ctes[15]-ctes[27]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression
+	printf("Dkappa=%lf\n",Dkappa);
 	Dkappa=Dkappa/((double)(*Nk)-1.0);
+	printf("Dkappa=%lf\n",Dkappa);
 
 	cudaMemcpy(k_d, k, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
 	kernel_k<<<blocks,TPB>>> (k_d, Dkappa, *Nk);

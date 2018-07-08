@@ -31,17 +31,18 @@ PROGRAM kdfortran
 	E0L=8.3d8							! Laser electric field
 	E0zpf=E0L/1d2						! ZPF electric field
 	!E0=0
+        wL=3.54d15
         Damping=6.245835d-24
-        Delta=Damping*(wL**2d0)
-        Nk=100
-        PRINT*,"Delta=",Delta,"1/2"
+        Delta=100*Damping*(wL**2d0)
+        Nk=10000
+        PRINT*,"Delta=",Delta,"1/s"
 
         ALLOCATE(theta(Nk))
         ALLOCATE(phi(Nk))
         ALLOCATE(k(Nk))
 	
 	1 FORMAT(E18.10) !Must be an 8-digit difference between the number after the E and the number of digits after the decimal dot
-        2 FORMAT(E18.10,',',E18.10,',',E18.10)
+        2 FORMAT(E30.22,',',E18.10,',',E18.10)
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	!2 FORMAT(<2*N>E11.3) ! Trajectories
 	!3 FORMAT(E18.10) ! Screen
