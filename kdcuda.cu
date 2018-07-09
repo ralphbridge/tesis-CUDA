@@ -10,7 +10,7 @@
 #define TPB 1024 // Threads per block
 
 // constant memory
-__constant__ double ctes_d[28];
+__constant__ double ctes_d[29];
 /*
 ctes[0]  PI
 ctes[1]  q
@@ -40,8 +40,9 @@ ctes[24] dt
 ctes[25] D
 ctes[26] zimp
 ctes[27] Delta
+ctes[28] V
 */
-double ctes[28];
+double ctes[29];
 
 __device__ double f(double eta1, double eta2, double t, double y, double z , double vz)
 {
@@ -221,8 +222,17 @@ __global__ void kernel_i ( double *init, curandState* globalState , int n)
 	}
 }
 
+__global__ void kernel_eta ( double *eta, curandState* globalState , int n)
+{
+	int id = threadIdx.x + TPB * blockIdx.x;
+	if (id<n)
+	{
+		double number = generate(globalState, id, 2);
+		eta[id] = number;
+	}
+}
 // function called from main fortran program
-extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *theta, double *phi, double *k, double *dt, double *D, double *zimp, double *v0, double *wL, double *Delta, int *Nk, double *E0L, double *E0zpf) // Should I provide this variables as pointers or not?
+extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *theta, double *phi, double *k, double *xi, double *eta, double *dt, double *D, double *zimp, double *v0, double *wL, double *Delta, int *Nk, double *E0L, double *E0zpf) // Should I provide this variables as pointers or not?
 //extern "C" void kernel_wrapper_(double *phi, double *pos, double *posy, double *posz, int *rows, int *Np, double *dt, double *D, double *zimp, double *v0, double *E0) // Should I provide this variables as pointers or not?
 {
 	ctes[0]=3.1415926535; // PI
@@ -258,18 +268,17 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	ctes[26]=*zimp; // distance from laser to screen
 
 	ctes[27]=*Delta;
-	
-	cudaMemcpyToSymbol(ctes_d, ctes, 28 * sizeof(double), 0, cudaMemcpyHostToDevice);
-
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 	double *init_d, *pos_d;
-	double *theta_d, *phi_d, *k_d; // Without
+	double *theta_d, *phi_d, *k_d, *xi_d;
+	double *eta_d;
 	double Dkappa;
 	Dkappa=(pow(ctes[15]+ctes[27]/2.0,3.0)-pow(ctes[15]-ctes[27]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression
+	ctes[28]=2.0*pow(ctes[0],2.0)*(*Nk)/Dkappa; // V <---------- and this one
 	Dkappa=Dkappa/((double)(*Nk)-1.0);
-	printf("Dkappa=%lf\n",Dkappa);
-
+	//printf("Dkappa=%lf\n",Dkappa);
 	//double  *phi_d, *pos_d, *posy_d, *posz_d;   // With
+	cudaMemcpyToSymbol(ctes_d, ctes, 29 * sizeof(double), 0, cudaMemcpyHostToDevice);
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
 	/*printf("Np=%i\n",*Np);
@@ -290,10 +299,11 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	cudaMalloc( (void **)&theta_d, sizeof(double) * (*Nk) );
 	cudaMalloc( (void **)&phi_d, sizeof(double) * (*Nk) );
 	cudaMalloc( (void **)&k_d, sizeof(double) * (*Nk) );
-
+	cudaMalloc( (void **)&xi_d, sizeof(double) * (*Nk) );
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 	//cudaMalloc( (void **)&posy_d, (*rows) * sizeof(double) * (*Np)  ); // Trajectories y
 	//cudaMalloc( (void **)&posz_d, (*rows) * sizeof(double) * (*Np) ); // Trajectories z
+	cudaMalloc( (void **)&eta_d, sizeof(double) * (*Np) );
 	cudaMalloc( (void **)&init_d, sizeof(double) * (*Np) );
 	cudaMalloc( (void **)&pos_d, sizeof(double) * (*Np) ); // Impact positions
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
@@ -313,6 +323,9 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	kernel_ang<<<blocks,TPB>>> (theta_d, devStates, *Nk, 1);
 
 	// phi random generation
+	/*srand(time(0));
+	seed = rand();
+	setup_kernels<<<blocks,TPB>>>(devStates,seed);*/
 	cudaMemcpy(phi_d, phi, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
 	kernel_ang<<<blocks,TPB>>> (phi_d, devStates, *Nk, 2);
 
@@ -332,6 +345,12 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 	cudaMemcpy(k_d, k, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
 	kernel_k<<<blocks,TPB>>> (k_d, Dkappa, *Nk);
+	// xi random generation
+	/*srand(time(0));
+	seed = rand();
+	setup_kernels<<<blocks,TPB>>>(devStates,seed);*/
+	cudaMemcpy(xi_d, xi, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
+	kernel_ang<<<blocks,TPB>>> (xi_d, devStates, *Nk, 2);
 
 //////////////////////////////// RANDOM NUMBERS FOR INITIAL POSITION ///////////////////
 	//curandState* devStates;
@@ -346,12 +365,21 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 	cudaMemcpy(init_d, init, sizeof(double) * (*Np), cudaMemcpyHostToDevice );
 	kernel_i<<<blocks,TPB>>> (init_d, devStates, *Np);
+	
+	//setup seeds
+	srand(time(0));
+	seed = rand();
+	setup_kernels<<<blocks,TPB>>>(devStates,seed);
+
+	cudaMemcpy(eta_d, eta, sizeof(double) * (*Np), cudaMemcpyHostToDevice );
+	kernel_eta<<<blocks,TPB>>> (eta_d, devStates, *Np);
 
 // copy vectors back from GPU to CPU
 	cudaMemcpy( theta, theta_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
 	cudaMemcpy( phi, phi_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
 	cudaMemcpy( k, k_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
-
+	cudaMemcpy( xi, xi_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
+	cudaMemcpy( eta, eta_d, sizeof(double) * (*Np), cudaMemcpyDeviceToHost );
 ////////////////////////////// PATHS ///////////////////////////////////////////
 
 	/*printf("\nNp=%i\n",*Np);
@@ -383,6 +411,8 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	cudaFree(theta_d);
 	cudaFree(phi_d);
 	cudaFree(k_d);
+	cudaFree(xi_d);
+	cudaFree(eta_d);
 	cudaFree(init_d);
 	cudaFree(pos_d); // Impact positions
 	cudaFree(ctes_d);

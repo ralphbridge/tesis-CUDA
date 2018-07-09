@@ -9,12 +9,14 @@ PROGRAM kdfortran
         REAL(8), ALLOCATABLE :: theta(:)
         REAL(8), ALLOCATABLE :: phi(:)
         REAL(8), ALLOCATABLE :: k(:)
+        REAL(8), ALLOCATABLE :: xi(:)
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! %%%%%%%%%%% IF YOU WANT TO RECORD THE COMPLETE POSITIONS, UNCOMMENT %%%%%%%%%%%%%%
 ! %%%%%%%%%%%%%%%%%%%%%%%%% MARKED BY THIS DELIMITERS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	!REAL(8), DIMENSION(N) :: pos ! Vector of the impact positions for each particle
-	REAL(8), ALLOCATABLE :: init(:)
+	REAL(8), ALLOCATABLE :: eta(:)
+        REAL(8), ALLOCATABLE :: init(:)
         REAL(8), ALLOCATABLE :: pos(:)
 	!REAL(8), ALLOCATABLE :: posy(:),posz(:) ! Complete "vector" of the positions (y,z) for each particle
 	!REAL(8), ALLOCATABLE :: postab(:,:) ! Table formed from vectors "posy" and "posz"
@@ -40,9 +42,10 @@ PROGRAM kdfortran
         ALLOCATE(theta(Nk))
         ALLOCATE(phi(Nk))
         ALLOCATE(k(Nk))
+        ALLOCATE(xi(Nk))
 	
 	1 FORMAT(E18.10) !Must be an 8-digit difference between the number after the E and the number of digits after the decimal dot
-        2 FORMAT(E30.22,',',E18.10,',',E18.10)
+        2 FORMAT(E30.22,',',E18.10,',',E18.10,',',E18.10)
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	!2 FORMAT(<2*N>E11.3) ! Trajectories
 	!3 FORMAT(E18.10) ! Screen
@@ -65,6 +68,7 @@ PROGRAM kdfortran
 !	PRINT*,"rows=",rows
 	!ALLOCATE(phi(3*N))
 	!ALLOCATE(ang(N,3))
+        ALLOCATE(eta(N))
         ALLOCATE(init(N))
 	ALLOCATE(pos(N))
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -89,9 +93,15 @@ PROGRAM kdfortran
 		OPEN(18,FILE="screen.txt",STATUS="old")
 		CLOSE(18,STATUS="delete")
 	END IF
+        INQUIRE(FILE='angles.txt',EXIST=e)
+	IF (e) THEN
+		OPEN(17,FILE="angles.txt",STATUS="old")
+		CLOSE(17,STATUS="delete")
+	END IF
+
 
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-	CALL kernel_wrapper(init,pos,N,theta,phi,k,dt,D,zimp,v0,wL,Delta,Nk,E0L,E0zpf) ! Without
+	CALL kernel_wrapper(init,pos,N,theta,phi,k,xi,eta,dt,D,zimp,v0,wL,Delta,Nk,E0L,E0zpf) ! Without
 	!CALL kernel_wrapper(phi,pos,posy,posz,rows,N,dt,D,zimp,v0,E0) ! With
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -114,7 +124,7 @@ PROGRAM kdfortran
 
         OPEN(19,FILE="k-vectors.txt",STATUS="new")
         DO i=1,Nk
-                WRITE(19,2) k(i),theta(i),phi(i)
+                WRITE(19,2) k(i),theta(i),phi(i),xi(i)
         END DO
         CLOSE(19)
 	!PRINT*,"yi=",ang(1,3)
@@ -138,7 +148,10 @@ PROGRAM kdfortran
 	OPEN(18,FILE="screen.txt",STATUS="new")
 	WRITE(18,1) pos ! Impact positions
 	CLOSE(18)
-	
+
+        OPEN(17,FILE="angles.txt",STATUS="new")
+	WRITE(17,1) eta
+        CLOSE(17)
 	CALL CPU_TIME(finish)
 	
 	PRINT*,"Tiempo total:",finish-start,"s"
