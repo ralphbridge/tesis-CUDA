@@ -36,7 +36,7 @@ PROGRAM kdfortran
         wL=3.54d15
         Damping=6.245835d-24
         Delta=100*Damping*(wL**2d0)
-        Nk=10000
+        Nk=100
         PRINT*,"Delta=",Delta,"1/s"
 
         ALLOCATE(theta(Nk))

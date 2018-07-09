@@ -129,19 +129,22 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *ini
 			//zii=zi+ctes_d[24]*vzi+powf(ctes_d[24],2.0)*(kvz1+kvz2+kvz3)/6.0;
 
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Using Euler %%%%%%%%%%%%%%%%%%%%% */
-			vyii=vyi+ctes_d[24]*f(theta[3*idx],phi[3*idx+1],ti,yi,zi,vzi);
-			vzii=vzi+ctes_d[24]*g(theta[3*idx],phi[3*idx+1],ti,yi,zi,vyi);
-			
+			//vyii=vyi+ctes_d[24]*f(theta[3*idx],phi[3*idx+1],ti,yi,zi,vzi);
+			vyii=f(theta[0],phi[0],k[0],xi[0],eta[0],ti,yi,zi,vzi);
+			for (int j=1;j<*Nk;j++)
+			{
+				vyii=vyii+f(theta[j],phi[j],k[j],xi[j],eta[j],ti,yi,zi,vzi);
+			}
+			vyii=vyi+ctes_d[24]*vyii;
+			//vzii=vzi+ctes_d[24]*g(theta[3*idx],phi[3*idx+1],ti,yi,zi,vyi);
 			yii=yi+ctes_d[24]*vyi;
 			zii=zi+ctes_d[24]*vzi;
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */			
 			ti=ti+ctes_d[24];
-			
 			vyi=vyii;
 			vzi=vzii;
 			yi=yii;
 			zi=zii;
-			
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 			//atomicAdd(&(posy[idx*rows+i+1]), yi); // Trajectories y
 			//atomicAdd(&(posz[idx*rows+i+1]), zi); // Trajectories z
@@ -168,7 +171,10 @@ __device__ double generate( curandState * globalState, int ind, int i=0 )
 	{
 		//RANDOM = (15e-6)*curand_normal( &localState );
 		//RANDOM = 1e-4;
-		RANDOM = cos((2.0*curand_uniform( &localState )-0.5));
+		RANDOM = 2.0*(curand_uniform( &localState )-0.5);
+		//printf("rnd=%lf\n",RANDOM);
+		RANDOM = acos(RANDOM);
+		//printf("acos(rnd)=%lf\n",RANDOM);
 	} else if (i==2)
 	{
 		//RANDOM = 2.0*3.141592*(curand_uniform( &localState )-0.5);
@@ -398,7 +404,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	//cudaMemcpy( posz_d, posz, (*rows) * sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Trajectories z
 	cudaMemcpy( pos_d, pos, sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Impact positions
 
-//2	//particle_path<<<blocks,TPB>>>(theta_d,phi_d,k_d,init_d,pos_d,*Np,*Nk); // Without
+	particle_path<<<blocks,TPB>>>(theta_d,phi_d,k_d,xi_d,eta_d,init_d,pos_d,*Np,*Nk); // Without
 	//particle_path<<<blocks,N>>>(phi_d,pos_d,posy_d,posz_d,*rows,*Np); // With
 
    // copy vectors back from GPU to CPU
