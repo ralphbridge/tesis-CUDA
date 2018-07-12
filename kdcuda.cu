@@ -326,8 +326,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	ctes[10]=ctes[9]/ctes[4]; // k_Compton
 	ctes[11]=2.0*ctes[0]/ctes[10]; // lambda_Compton ~ 2.43e-12 m
 	
-	//ctes[15]=3.54e15; // omega_Laser
-	ctes[12]=*wL;
+	ctes[12]=*wL; // omega_Laser=3.54e15 rad/s
 	ctes[13]=ctes[12]/ctes[4]; // k_Laser
 	ctes[14]=2.0*ctes[0]/ctes[13]; // lambda_Laser ~ 532 nm
 	
@@ -399,19 +398,6 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	kernel_ang<<<blocks,TPB>>> (phi_d, devStates, *Nk, 2);
 
 //////////////////////////////// k radii (not random) ///////////////////////////////
-	//Dkappa=1.0;
-	/*Dkappa=pow(ctes[15]+ctes[27]/2.0,3.0);
-	printf("Dkappa=%lf\n",Dkappa);
-	Dkappa=-pow(ctes[15]-ctes[27]/2.0,3.0);
-	printf("Dkappa=%lf\n",Dkappa);
-	Dkappa=(3.0*pow(ctes[4],3.0));
-	printf("Dkappa=%lf\n",Dkappa);
-	printf("Dkappa=%lf\n",1/((double)(*Nk)-1.0));
-	Dkappa=(pow(ctes[15]+ctes[27]/2.0,3.0)-pow(ctes[15]-ctes[27]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression
-	printf("Dkappa=%lf\n",Dkappa);
-	Dkappa=Dkappa/((double)(*Nk)-1.0);
-	printf("Dkappa=%lf\n",Dkappa);*/
-
 	cudaMemcpy(k_d, k, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
 	kernel_k<<<blocks,TPB>>> (k_d, Dkappa, *Nk);
 	// xi random generation
@@ -451,8 +437,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	cudaMemcpy( phi, phi_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
 	cudaMemcpy( k, k_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
 	cudaMemcpy( xi, xi_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
-	cudaMemcpy( eta, eta_d, 2*sizeof(double) * (*Np), cudaMemcpyDeviceToHost );
-////////////////////////////// PATHS ///////////////////////////////////////////
+	////////////////////////////// PATHS ///////////////////////////////////////////
 
 	/*printf("\nNp=%i\n",*Np);
 	printf("numerador=%i\n",*Np);
@@ -476,6 +461,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
    // copy vectors back from GPU to CPU
 	//cudaMemcpy( posy, posy_d, (*rows) * sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Trajectories y
 	//cudaMemcpy( posz, posz_d, (*rows) * sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Trajectories z
+	cudaMemcpy( eta, eta_d, 2*sizeof(double) * (*Np), cudaMemcpyDeviceToHost );
 	cudaMemcpy( init, init_d, sizeof(double) * (*Np), cudaMemcpyDeviceToHost );
 	cudaMemcpy( pos, pos_d, sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Impact positions
    
