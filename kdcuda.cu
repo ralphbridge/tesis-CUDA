@@ -10,74 +10,133 @@
 #define TPB 1024 // Threads per block
 
 // constant memory
-__constant__ double ctes_d[29];
+__constant__ double ctes_d[22];
 /*
 ctes[0]  PI
 ctes[1]  q
 ctes[2]  m
 ctes[3]  hbar
 ctes[4]  c
-ctes[5]  v0
-ctes[6]  beta
-ctes[7]  gamma
-ctes[8]  omega_Compton
-ctes[9]  omega_A
-ctes[10] omega_B
-ctes[11] k_Compton
-ctes[12] k_A
-ctes[13] k_B
-ctes[14] lambda_Compton
-ctes[15] omega_Laser
-ctes[16] omega_A Laser
-ctes[17] omega_B Laser
-ctes[18] k_Laser
-ctes[19] k_A Laser
-ctes[20] k_B Laser
-ctes[21] lambda_Laser
-ctes[22] E0 Laser
-ctes[23] E0 ZPF
-ctes[24] dt
-ctes[25] D
-ctes[26] zimp
-ctes[27] Delta
-ctes[28] V
+ctes[5]  epsilon_0
+ctes[6]  v0
+ctes[7]  beta
+ctes[8]  gamma
+ctes[9]  omega_Compton
+ctes[10] k_Compton
+ctes[11] lambda_Compton
+ctes[12] omega_Laser
+ctes[13] k_Laser
+ctes[14] lambda_Laser
+ctes[15] E0 Laser
+ctes[16] dt
+ctes[17] D
+ctes[18] zimp
+ctes[19] Delta
+ctes[20] V
 */
-double ctes[29];
+double ctes[22];
 
-__device__ double f(double eta1, double eta2, double t, double y, double z , double vz)
+__device__ double f(double eta1, double eta2, double theta, double phi, double k, double xi, double t, double x, double y, double z , double vy, double vz)
 {
-	double phi1zpf=ctes_d[9]*t-ctes_d[13]*z+eta1+ctes_d[10]*t-ctes_d[12]*z;
-	double phi2zpf=ctes_d[9]*t-ctes_d[13]*z+eta2-ctes_d[10]*t+ctes_d[12]*z;
+	double w=k/ctes_d[4];
+	double wA=ctes_d[8]*w;
+	double wB=ctes_d[7]*wA;
+	double kA=ctes_d[8]*k;
+	double kB=ctes_d[7]*kA;
+	double sintheta=sin(theta);
+	double costheta=cos(theta);
+	double sinphi=sin(phi);
+	double cosphi=cos(phi);
+	double sinxi=sin(xi);
+	double cosxi=cos(xi);
+	double phi1zpf=(wA+wB*costheta)*t-(kA*costheta+kB)*z-k*sintheta*(x*cosphi+y*sinphi)+eta1;
+	double phi2zpf=(wA-wB*costheta)*t+(kA*costheta-kB)*z+k*sintheta*(x*cosphi+y*sinphi)+eta2;
+	double E0zpf=sqrt(ctes_d[3]*w/(ctes_d[5]*ctes_d[20]));
+	
 	double result=0.0;
-	if (z<=ctes_d[25]){
-		//double phi1L=ctes_d[16]*t-ctes_d[20]*z-ctes_d[18]*y;
-		//double phi2L=ctes_d[16]*t-ctes_d[20]*z+ctes_d[18]*y;
-		double phi1L=ctes_d[15]*t-ctes_d[18]*y;
-		double phi2L=ctes_d[15]*t+ctes_d[18]*y;
-		double EL=ctes_d[22]*exp(-(pow(z-ctes_d[25]/2.0,2.0))/(2.0*pow(ctes_d[25]/5.0,2.0)));
-		result = ctes_d[1]*sqrtf(1-pow(ctes_d[6],2.0))*ctes_d[23]*(cos(phi1zpf)+cos(phi2zpf))/ctes_d[2]+(ctes_d[1]*EL*(cos(phi1L)-cos(phi2L))/(ctes_d[2]*ctes_d[4]))*(vz-ctes_d[5]);
-	} else {
-		result = ctes_d[1]*sqrtf(1-pow(ctes_d[6],2.0))*ctes_d[23]*(cos(phi1zpf)+cos(phi2zpf))/ctes_d[2];
- 	}
+
+	result=(ctes_d[1]*E0zpf/ctes_d[2])*(cos(phi1zpf)+cos(phi2zpf))*(1-ctes_d[6]*vz/pow(ctes_d[4],2.0))*(costheta*cosphi*cosxi-sinphi*sinxi);
+	result=result+(ctes_d[1]*E0zpf/(ctes_d[2]*ctes_d[4]))*(cos(phi1zpf)-cos(phi2zpf))*(sintheta*sinxi*vy/ctes_d[8]-(cosphi*cosxi-costheta*sinphi*sinxi)*(vz-ctes_d[6]));
+
 	return result;
 }
 
-__device__ double g(double eta1, double eta2, double t, double y, double z , double vy)
+__device__ double g(double eta1, double eta2, double theta, double phi, double k, double xi, double t, double x, double y, double z , double vx, double vz)
 {
+	double w=k/ctes_d[4];
+	double wA=ctes_d[8]*w;
+	double wB=ctes_d[7]*wA;
+	double kA=ctes_d[8]*k;
+	double kB=ctes_d[7]*kA;
+	double sintheta=sin(theta);
+	double costheta=cos(theta);
+	double sinphi=sin(phi);
+	double cosphi=cos(phi);
+	double sinxi=sin(xi);
+	double cosxi=cos(xi);
+	double phi1zpf=(wA+wB*costheta)*t-(kA*costheta+kB)*z-k*sintheta*(x*cosphi+y*sinphi)+eta1;
+	double phi2zpf=(wA-wB*costheta)*t+(kA*costheta-kB)*z+k*sintheta*(x*cosphi+y*sinphi)+eta2;
+	double E0zpf=sqrt(ctes_d[3]*w/(ctes_d[5]*ctes_d[20]));
+	
 	double result=0.0;
-	if (z<=ctes_d[25]){
-		//double phi1L=ctes_d[16]*t-ctes_d[20]*z-ctes_d[18]*y;
-		//double phi2L=ctes_d[16]*t-ctes_d[20]*z+ctes_d[18]*y;
-		double phi1L=ctes_d[15]*t-ctes_d[18]*y;
-		double phi2L=ctes_d[15]*t+ctes_d[18]*y;
-		double EL=ctes_d[22]*exp(-(pow(z-ctes_d[25]/2.0,2.0))/(2.0*pow(ctes_d[25]/5.0,2.0)));
-		result = (ctes_d[1]*EL/ctes_d[2])*((cos(phi1L)+cos(phi2L))/ctes_d[7]-(cos(phi1L)-cos(phi2L))*vy/ctes_d[4]);
-	}
+
+	result=(ctes_d[1]*E0zpf/ctes_d[2])*(cos(phi1zpf)+cos(phi2zpf))*(1-ctes_d[6]*vz/pow(ctes_d[4],2.0))*(costheta*sinphi*cosxi+cosphi*sinxi);
+	result=result-(ctes_d[1]*E0zpf/(ctes_d[2]*ctes_d[4]))*(cos(phi1zpf)-cos(phi2zpf))*(sintheta*sinxi*vx/ctes_d[8]+(sinphi*cosxi+costheta*cosphi*sinxi)*(vz-ctes_d[6]));
+
+	return result;
+}
+
+__device__ double gL(double t, double y, double z , double vz)
+{
+	double phi1L=ctes_d[12]*t-ctes_d[13]*y;
+	double phi2L=ctes_d[12]*t+ctes_d[13]*y;
+	double EL=ctes_d[15]*exp(-(pow(z-ctes_d[17]/2.0,2.0))/(2.0*pow(ctes_d[17]/5.0,2.0)));
+	
+	double result=0.0;
+
+	result = (ctes_d[1]*EL*(cos(phi1L)-cos(phi2L))/(ctes_d[2]*ctes_d[4]))*(vz-ctes_d[6]);
+	return result;
+}
+
+__device__ double h(double eta1, double eta2, double theta, double phi, double k, double xi, double t, double x, double y, double z, double vx, double vy)
+{
+	double w=k/ctes_d[4];
+	double wA=ctes_d[8]*w;
+	double wB=ctes_d[7]*wA;
+	double kA=ctes_d[8]*k;
+	double kB=ctes_d[7]*kA;
+	double sintheta=sin(theta);
+	double costheta=cos(theta);
+	double sinphi=sin(phi);
+	double cosphi=cos(phi);
+	double sinxi=sin(xi);
+	double cosxi=cos(xi);
+	double phi1zpf=(wA+wB*costheta)*t-(kA*costheta+kB)*z-k*sintheta*(x*cosphi+y*sinphi)+eta1;
+	double phi2zpf=(wA-wB*costheta)*t+(kA*costheta-kB)*z+k*sintheta*(x*cosphi+y*sinphi)+eta2;
+	double E0zpf=sqrt(ctes_d[3]*w/(ctes_d[5]*ctes_d[20]));
+	
+	double result=0.0;
+
+	result=-(ctes_d[1]*E0zpf/(ctes_d[2]*ctes_d[8]))*(cos(phi1zpf)+cos(phi2zpf))*(sintheta*cosxi);
+	result=result+(ctes_d[1]*E0zpf/(ctes_d[2]*ctes_d[4]))*(cos(phi1zpf)-cos(phi2zpf))*((costheta*cosxi-costheta*sinphi*sinxi)*vx+(sinphi*cosxi+costheta*cosphi*sinxi)*vy);
+
+	return result;
+}
+
+__device__ double hL(double t, double y, double z , double vy)
+{
+	double phi1L=ctes_d[12]*t-ctes_d[13]*y;
+	double phi2L=ctes_d[12]*t+ctes_d[13]*y;
+	double EL=ctes_d[15]*exp(-(pow(z-ctes_d[17]/2.0,2.0))/(2.0*pow(ctes_d[17]/5.0,2.0)));
+
+	double result=0.0;
+	
+	result = (ctes_d[1]*EL/ctes_d[2])*((cos(phi1L)+cos(phi2L))/ctes_d[8]-(cos(phi1L)-cos(phi2L))*vy/ctes_d[4]);
 	return result;
 }
 
 // this kernel computes the trajectory of a single electron
-__global__ void particle_path(double *theta, double *phi, double *k, double *init, double *pos, int N, int Nk) // Without
+__global__ void particle_path(double *theta, double *phi, double *k, double *xhi, double *eta, double *init, double *pos, int N, int Nk) // Without
 //__global__ void particle_path(double *ang, double *pos, double *posy, double *posz, int rows, int N) // With
 {
 	int idx=threadIdx.x+TPB*blockIdx.x;
@@ -85,11 +144,13 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *ini
 	//printf("N=%d\n",N);
 	if (idx<N){
 		double ti=0.0;
+		double xi=0.0;
 		double yi=init[idx];
 		double zi=0.0;
+		double vxi=0.0;
 		double vyi=0.0;
-		double vzi=ctes_d[5];
-		double yii,zii,vyii,vzii;
+		double vzi=ctes_d[6];
+		double xii,yii,zii,vxii,vyii,vzii;
 		//double kvy1,kvy2,kvy3,kvy4,kvz1,kvz2,kvz3,kvz4;
 		
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */		
@@ -108,7 +169,7 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *ini
 		printf("");*/
 
 		//while (zi<=ctes_d[26]) {
-		while (zi<=ctes_d[25]) {                         // TESTING WITHOUT ZPF (?)
+		while (zi<=ctes_d[17]) {
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Using RK4 %%%%%%%%%%%%%%%%%%%%% */
 			/*kvy1=f(ang[3*idx],ang[3*idx+1],ti,yi,zi,vzi);
 			kvz1=g(ang[3*idx],ang[3*idx+1],ti,yi,zi,vyi);
@@ -129,34 +190,44 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *ini
 			//zii=zi+ctes_d[24]*vzi+powf(ctes_d[24],2.0)*(kvz1+kvz2+kvz3)/6.0;
 
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Using Euler %%%%%%%%%%%%%%%%%%%%% */
-			//vyii=vyi+ctes_d[24]*f(theta[3*idx],phi[3*idx+1],ti,yi,zi,vzi);
-			vyii=f(theta[0],phi[0],k[0],xi[0],eta[0],ti,yi,zi,vzi);
+			vxii=f(theta[0],phi[0],k[0],xhi[0],eta[0],eta[1],ti,xi,yi,zi,vxi,vzi);
 			for (int j=1;j<*Nk;j++)
 			{
-				vyii=vyii+f(theta[j],phi[j],k[j],xi[j],eta[j],ti,yi,zi,vzi);
+				vxii=vxii+f(theta[j],phi[j],k[j],xhi[j],eta[2*j],eta[2*j+1],ti,xi,yi,zi,vyi,vzi);
 			}
-			vyii=vyi+ctes_d[24]*vyii;
-			//vzii=vzi+ctes_d[24]*g(theta[3*idx],phi[3*idx+1],ti,yi,zi,vyi);
-			yii=yi+ctes_d[24]*vyi;
-			zii=zi+ctes_d[24]*vzi;
+			vxii=vxi+ctes_d[16]*vxii;
+			
+			vyii=g(theta[0],phi[0],k[0],xhi[0],eta[0],eta[1],ti,xi,yi,zi,vxi,vzi);
+			for (int j=1;j<*Nk;j++)
+			{
+				vyii=vyii+g(theta[j],phi[j],k[j],xhi[j],eta[2*j],eta[2*j+1],ti,xi,yi,zi,vxi,vzi);
+			}
+			vyii=vyii+gL(ti,yi,zi,vzi);
+			vyii=vyi+ctes_d[16]*vyii;
+			
+			vzii=h(theta[0],phi[0],k[0],xhi[0],eta[0],eta[1],ti,xi,yi,zi,vxi,vyi);
+			for (int j=1;j<*Nk;j++)
+			{
+				vzii=vzii+h(theta[j],phi[j],k[j],xhi[j],eta[2*j],eta[2*j+1],ti,xi,yi,zi,vxi,vyi);
+			}
+			vzii=vzii+hL(ti,yi,zi,vyi);
+			vzii=vzi+ctes_d[16]*vzii;
+
+			xii=xi+ctes_d[16]*vxi;
+			yii=yi+ctes_d[16]*vyi;
+			zii=zi+ctes_d[16]*vzi;
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */			
-			ti=ti+ctes_d[24];
+			ti=ti+ctes_d[16];
+			vxi=vxii;
 			vyi=vyii;
 			vzi=vzii;
+			xi=xii;
 			yi=yii;
 			zi=zii;
-/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
-			//atomicAdd(&(posy[idx*rows+i+1]), yi); // Trajectories y
-			//atomicAdd(&(posz[idx*rows+i+1]), zi); // Trajectories z
-/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
-		
+/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */			
 			__syncthreads(); // Does it go here?
-			//printf("Proceso finalizado\n");
 		}
-		//printf("yf=%f\n",yi);
-		//printf("zf=%f\n",zi);
-		yi=yi+(ctes_d[26]-ctes_d[25])*vyi/vzi;
-		//atomicAdd(&(pos[idx]), yi); // Impact positions
+		yi=yi+(ctes_d[18]-ctes_d[17])*vyi/vzi;
 		pos[idx]=yi;
 	}
 }
@@ -178,7 +249,7 @@ __device__ double generate( curandState * globalState, int ind, int i=0 )
 	} else if (i==2)
 	{
 		//RANDOM = 2.0*3.141592*(curand_uniform( &localState )-0.5);
-		RANDOM = 2.0*3.141592*curand_uniform( &localState );
+		RANDOM = 2.0*ctes_d[0]*curand_uniform( &localState );
 	} else
 	{
 		RANDOM = (15e-6)*curand_normal( &localState );
@@ -207,7 +278,7 @@ __global__ void kernel_ang ( double *N, curandState* globalState, int n, int i )
 __device__ double genKappa ( double Dk, int i )
 {
 	double kappa=0.0;
-	kappa=pow(ctes_d[15]-ctes_d[27]/2.0,3.0)/(3*(pow(ctes_d[4],3.0)))+(i-1)*Dk;
+	kappa=pow(ctes_d[12]-ctes_d[19]/2.0,3.0)/(3*(pow(ctes_d[4],3.0)))+(i-1)*Dk;
 	return kappa;
 }
 
@@ -238,7 +309,7 @@ __global__ void kernel_eta ( double *eta, curandState* globalState , int n)
 	}
 }
 // function called from main fortran program
-extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *theta, double *phi, double *k, double *xi, double *eta, double *dt, double *D, double *zimp, double *v0, double *wL, double *Delta, int *Nk, double *E0L, double *E0zpf) // Should I provide this variables as pointers or not?
+extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *theta, double *phi, double *k, double *xi, double *eta, double *dt, double *D, double *zimp, double *v0, double *wL, double *Delta, int *Nk, double *E0L)
 //extern "C" void kernel_wrapper_(double *phi, double *pos, double *posy, double *posz, int *rows, int *Np, double *dt, double *D, double *zimp, double *v0, double *E0) // Should I provide this variables as pointers or not?
 {
 	ctes[0]=3.1415926535; // PI
@@ -246,41 +317,33 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	ctes[2]=9.10938356e-31; // m
 	ctes[3]=1.0545718e-34; // hbar
 	ctes[4]=299792458.0; // c
-	ctes[5]=*v0;
-	ctes[6]=ctes[5]/ctes[4]; // beta
-	ctes[7]=1.0/sqrtf(1.0-pow(ctes[6],2.0)); // gamma
+	ctes[5]=8.854187e-12; // epsilon_0
+	ctes[6]=*v0;
+	ctes[7]=ctes[6]/ctes[4]; // beta
+	ctes[8]=1.0/sqrtf(1.0-pow(ctes[7],2.0)); // gamma
 	
-	ctes[8]=(ctes[2]*pow(ctes[4],2.0))/ctes[3]; // omega_Compton
-	ctes[9]=ctes[7]*ctes[8]; // omega_A
-	ctes[10]=ctes[6]*ctes[9]; // omega_B
-	ctes[11]=ctes[8]/ctes[4]; // k_Compton
-	ctes[12]=ctes[7]*ctes[11]; // k_A
-	ctes[13]=ctes[6]*ctes[12]; // k_B
-	ctes[14]=2.0*ctes[0]/ctes[11]; // lambda_Compton ~ 2.43e-12 m
+	ctes[9]=(ctes[2]*pow(ctes[4],2.0))/ctes[3]; // omega_Compton
+	ctes[10]=ctes[9]/ctes[4]; // k_Compton
+	ctes[11]=2.0*ctes[0]/ctes[10]; // lambda_Compton ~ 2.43e-12 m
 	
 	//ctes[15]=3.54e15; // omega_Laser
-	ctes[15]=*wL;
-	ctes[16]=ctes[7]*ctes[15]; // omega_A Laser
-	ctes[17]=ctes[6]*ctes[16]; // omega_B Laser
-	ctes[18]=ctes[15]/ctes[4]; // k_Laser
-	ctes[19]=ctes[7]*ctes[18]; // k_A Laser
-	ctes[20]=ctes[6]*ctes[19]; // k_B Laser
-	ctes[21]=2.0*ctes[0]/ctes[18]; // lambda_Laser ~ 532 nm
+	ctes[12]=*wL;
+	ctes[13]=ctes[12]/ctes[4]; // k_Laser
+	ctes[14]=2.0*ctes[0]/ctes[13]; // lambda_Laser ~ 532 nm
 	
-	ctes[22]=*E0L; // E0 laser
-	ctes[23]=*E0zpf; // E0 ZPF
-	ctes[24]=*dt; // time step
-	ctes[25]=*D; // laser beam waist
-	ctes[26]=*zimp; // distance from laser to screen
+	ctes[15]=*E0L; // E0 laser
+	ctes[16]=*dt; // time step
+	ctes[17]=*D; // laser beam waist
+	ctes[18]=*zimp; // distance from laser to screen
 
-	ctes[27]=*Delta;
+	ctes[19]=*Delta;
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 	double *init_d, *pos_d;
 	double *theta_d, *phi_d, *k_d, *xi_d;
 	double *eta_d;
 	double Dkappa;
-	Dkappa=(pow(ctes[15]+ctes[27]/2.0,3.0)-pow(ctes[15]-ctes[27]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression
-	ctes[28]=2.0*pow(ctes[0],2.0)*(*Nk)/Dkappa; // V <---------- and this one
+	Dkappa=(pow(ctes[12]+ctes[19]/2.0,3.0)-pow(ctes[12]-ctes[19]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression
+	ctes[20]=2.0*pow(ctes[0],2.0)*(*Nk)/Dkappa; // V <---------- and this one
 	Dkappa=Dkappa/((double)(*Nk)-1.0);
 	//printf("Dkappa=%lf\n",Dkappa);
 	//double  *phi_d, *pos_d, *posy_d, *posz_d;   // With
@@ -309,7 +372,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 	//cudaMalloc( (void **)&posy_d, (*rows) * sizeof(double) * (*Np)  ); // Trajectories y
 	//cudaMalloc( (void **)&posz_d, (*rows) * sizeof(double) * (*Np) ); // Trajectories z
-	cudaMalloc( (void **)&eta_d, sizeof(double) * (*Np) );
+	cudaMalloc( (void **)&eta_d, 2*sizeof(double) * (*Np) );
 	cudaMalloc( (void **)&init_d, sizeof(double) * (*Np) );
 	cudaMalloc( (void **)&pos_d, sizeof(double) * (*Np) ); // Impact positions
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
@@ -373,11 +436,14 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	kernel_i<<<blocks,TPB>>> (init_d, devStates, *Np);
 	
 	//setup seeds
+	cudaMalloc ( &devStates, 2*(*Np)*sizeof( curandState ) );
+	blocks = (int)ceil((double)2*(*Np)/TPB);
+
 	srand(time(0));
 	seed = rand();
 	setup_kernels<<<blocks,TPB>>>(devStates,seed);
 
-	cudaMemcpy(eta_d, eta, sizeof(double) * (*Np), cudaMemcpyHostToDevice );
+	cudaMemcpy(eta_d, eta, 2*sizeof(double) * (*Np), cudaMemcpyHostToDevice );
 	kernel_eta<<<blocks,TPB>>> (eta_d, devStates, *Np);
 
 // copy vectors back from GPU to CPU
@@ -385,7 +451,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	cudaMemcpy( phi, phi_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
 	cudaMemcpy( k, k_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
 	cudaMemcpy( xi, xi_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
-	cudaMemcpy( eta, eta_d, sizeof(double) * (*Np), cudaMemcpyDeviceToHost );
+	cudaMemcpy( eta, eta_d, 2*sizeof(double) * (*Np), cudaMemcpyDeviceToHost );
 ////////////////////////////// PATHS ///////////////////////////////////////////
 
 	/*printf("\nNp=%i\n",*Np);
@@ -411,7 +477,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	//cudaMemcpy( posy, posy_d, (*rows) * sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Trajectories y
 	//cudaMemcpy( posz, posz_d, (*rows) * sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Trajectories z
 	cudaMemcpy( init, init_d, sizeof(double) * (*Np), cudaMemcpyDeviceToHost );
-//3	cudaMemcpy( pos, pos_d, sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Impact positions
+	cudaMemcpy( pos, pos_d, sizeof(double) * (*Np), cudaMemcpyDeviceToHost ); // Impact positions
    
    // free GPU memory
 	cudaFree(theta_d);
