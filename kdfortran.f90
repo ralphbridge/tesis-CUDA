@@ -25,14 +25,13 @@ PROGRAM kdfortran
 	LOGICAL :: e
 	REAL(8) :: start,finish
 	
-	N=10240						! Number of particles
+	N=1024						! Number of particles
 	dt=1d-17					! Time step in seconds
 	D=125d-6						! Laser beam waist in meters
 	zimp=24d-2+D						! Distance from laser to screen in meters
 	v0=1.1d7						! Electron velocity
-	E0L=8.3d8							! Laser electric field
-	E0zpf=E0L/1d2						! ZPF electric field
-	!E0=0
+	E0L=2d8						! Laser electric field
+	!E0zpf=E0L/1d2						! ZPF electric field
         wL=3.54d15
         Damping=6.245835d-24
         Delta=100*Damping*(wL**2d0)
@@ -53,7 +52,6 @@ PROGRAM kdfortran
 	PRINT*,"-------------------------------------------------------------"
 	PRINT*,"N=",N,"particles"
 	PRINT*,"E0L=",E0L,"V/m"
-	PRINT*,"E0zpf=",E0zpf,"V/m"
         PRINT*,"Nk=",Nk,"modes"
 	PRINT*,"dt=",dt,"s"
 	PRINT*,"v0=",v0,"m/s"
@@ -68,7 +66,7 @@ PROGRAM kdfortran
 !	PRINT*,"rows=",rows
 	!ALLOCATE(phi(3*N))
 	!ALLOCATE(ang(N,3))
-        ALLOCATE(eta(N))
+        ALLOCATE(eta(2*N))
         ALLOCATE(init(N))
 	ALLOCATE(pos(N))
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -101,7 +99,7 @@ PROGRAM kdfortran
 
 
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-	CALL kernel_wrapper(init,pos,N,theta,phi,k,xi,eta,dt,D,zimp,v0,wL,Delta,Nk,E0L,E0zpf) ! Without
+	CALL kernel_wrapper(init,pos,N,theta,phi,k,xi,eta,dt,D,zimp,v0,wL,Delta,Nk,E0L) ! Without
 	!CALL kernel_wrapper(phi,pos,posy,posz,rows,N,dt,D,zimp,v0,E0) ! With
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
