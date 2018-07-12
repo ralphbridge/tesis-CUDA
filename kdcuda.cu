@@ -315,7 +315,8 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	ctes[0]=3.1415926535; // PI
 	ctes[1]=1.6e-19; // q
 	ctes[2]=9.10938356e-31; // m
-	ctes[3]=1.0545718e-34; // hbar
+	ctes[3]=0.0; // use this to see "classical" results
+	//ctes[3]=1.0545718e-34; // hbar
 	ctes[4]=299792458.0; // c
 	ctes[5]=8.854187e-12; // epsilon_0
 	ctes[6]=*v0;
