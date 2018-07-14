@@ -7,7 +7,7 @@
 #include<curand.h>
 #include<curand_kernel.h>
 
-#define TPB 16 // Threads per block
+#define TPB 128 // Threads per block
 
 // constant memory
 __constant__ double ctes_d[21];
@@ -145,7 +145,8 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *xhi
 	if (idx<N){
 		double ti=0.0;
 		double xi=0.0;
-		double yi=init[idx];
+		//double yi=init[idx];
+		double yi=0.5e-5;
 		double zi=0.0;
 		double vxi=0.0;
 		double vyi=0.0;
@@ -278,17 +279,17 @@ __global__ void kernel_ang ( double *N, curandState* globalState, int n, int i )
 		N[id] = number;
 	}
 }
-__device__ double genKappa ( double Dk, int i )
+__device__ double genKappa ( double wres, double Dk, int i )
 {
 	double kappa=0.0;
-	kappa=pow(ctes_d[12]-ctes_d[19]/2.0,3.0)/(3.0*(pow(ctes_d[4],3.0)))+(i-1)*Dk;
+	kappa=pow(wres-ctes_d[19]/2.0,3.0)/(3.0*(pow(ctes_d[4],3.0)))+(i-1)*Dk;
 	return kappa;
 }
 
-__global__ void kernel_k ( double *k, double Dkappa, int n )
+__global__ void kernel_k ( double *k, double wres, double Dkappa, int n )
 {
 	int id = threadIdx.x + TPB * blockIdx.x;
-	double kappa=genKappa(Dkappa,id);
+	double kappa=genKappa(wres,Dkappa,id);
 	k[id]=pow(3.0*kappa,1.0/3.0);
 }
 
@@ -315,18 +316,19 @@ __global__ void kernel_eta ( double *eta, curandState* globalState , int n)
 extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *theta, double *phi, double *k, double *xi, double *eta, double *dt, double *D, double *zimp, double *v0, double *wL, double *Delta, int *Nk, double *E0L)
 //extern "C" void kernel_wrapper_(double *phi, double *pos, double *posy, double *posz, int *rows, int *Np, double *dt, double *D, double *zimp, double *v0, double *E0) // Should I provide this variables as pointers or not?
 {
+	cudaSetDevice(0);
 	ctes[0]=3.1415926535; // PI
 	ctes[1]=1.6e-19; // q
 	ctes[2]=9.10938356e-31; // m
-	ctes[3]=0.0; // use this to see "classical" results
-	//ctes[3]=1.0545718e-34; // hbar
+	//ctes[3]=0.0; // use this to see "classical" results
+	ctes[3]=1.0545718e-34; // hbar
 	ctes[4]=299792458.0; // c
 	ctes[5]=8.854187e-12; // epsilon_0
 	ctes[6]=*v0;
 	ctes[7]=ctes[6]/ctes[4]; // beta
 	ctes[8]=1.0/sqrtf(1.0-pow(ctes[7],2.0)); // gamma
 	
-	ctes[9]=(ctes[2]*pow(ctes[4],2.0))/ctes[3]; // omega_Compton
+	ctes[9]=(ctes[2]*pow(ctes[4],2.0))/ctes[3]; // omega_Compton ~ 7.8e20 rad/s
 	ctes[10]=ctes[9]/ctes[4]; // k_Compton
 	ctes[11]=2.0*ctes[0]/ctes[10]; // lambda_Compton ~ 2.43e-12 m
 	
@@ -345,8 +347,13 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	double *theta_d, *phi_d, *k_d, *xi_d;
 	double *eta_d;
 	double Dkappa;
-	Dkappa=(pow(ctes[12]+ctes[19]/2.0,3.0)-pow(ctes[12]-ctes[19]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression
+	double wres=ctes[9]; // Resonance around w_Compton
+	//double wres=ctes[12]; // Resonance around w_Laser
+	Dkappa=(pow(wres+ctes[19]/2.0,3.0)-pow(wres-ctes[19]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression (Vk)
+	printf("Vk=%.10e\n",4.0*ctes[0]*Dkappa);
 	ctes[20]=2.0*pow(ctes[0],2.0)*(*Nk)/Dkappa; // V <---------- and this one
+	printf("V=%.10e\n",ctes[20]);
+	printf("EL_i=%.10e\n",sqrt(ctes[3]*ctes[12]/(ctes[5]*ctes[20])));
 	Dkappa=Dkappa/((double)(*Nk)-1.0);
 	//printf("Dkappa=%lf\n",Dkappa);
 	//double  *phi_d, *pos_d, *posy_d, *posz_d;   // With
@@ -403,7 +410,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 //////////////////////////////// k radii (not random) ///////////////////////////////
 	cudaMemcpy(k_d, k, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
-	kernel_k<<<blocks,TPB>>> (k_d, Dkappa, *Nk);
+	kernel_k<<<blocks,TPB>>> (k_d, wres, Dkappa, *Nk);
 	// xi random generation
 	/*srand(time(0));
 	seed = rand();

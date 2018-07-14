@@ -34,7 +34,8 @@ PROGRAM kdfortran
 	!E0zpf=E0L/1d2						! ZPF electric field
         wL=3.54d15
         Damping=6.245835d-24
-        Delta=100*Damping*(wL**2d0)
+	PRINT*,"Damping=",Damping,"s"
+        Delta=Damping*(wL**2d0)
         Nk=100
         PRINT*,"Delta=",Delta,"1/s"
 
