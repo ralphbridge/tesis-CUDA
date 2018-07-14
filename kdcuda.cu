@@ -7,10 +7,10 @@
 #include<curand.h>
 #include<curand_kernel.h>
 
-#define TPB 1024 // Threads per block
+#define TPB 16 // Threads per block
 
 // constant memory
-__constant__ double ctes_d[22];
+__constant__ double ctes_d[21];
 /*
 ctes[0]  PI
 ctes[1]  q
@@ -34,9 +34,9 @@ ctes[18] zimp
 ctes[19] Delta
 ctes[20] V
 */
-double ctes[22];
+double ctes[21];
 
-__device__ double f(double eta1, double eta2, double theta, double phi, double k, double xi, double t, double x, double y, double z , double vy, double vz)
+__device__ double f(double theta, double phi, double k, double xi, double eta1, double eta2, double t, double x, double y, double z , double vy, double vz)
 {
 	double w=k/ctes_d[4];
 	double wA=ctes_d[8]*w;
@@ -61,7 +61,7 @@ __device__ double f(double eta1, double eta2, double theta, double phi, double k
 	return result;
 }
 
-__device__ double g(double eta1, double eta2, double theta, double phi, double k, double xi, double t, double x, double y, double z , double vx, double vz)
+__device__ double g(double theta, double phi, double k, double xi, double eta1, double eta2, double t, double x, double y, double z , double vx, double vz)
 {
 	double w=k/ctes_d[4];
 	double wA=ctes_d[8]*w;
@@ -98,7 +98,7 @@ __device__ double gL(double t, double y, double z , double vz)
 	return result;
 }
 
-__device__ double h(double eta1, double eta2, double theta, double phi, double k, double xi, double t, double x, double y, double z, double vx, double vy)
+__device__ double h(double theta, double phi, double k, double xi, double eta1, double eta2, double t, double x, double y, double z, double vx, double vy)
 {
 	double w=k/ctes_d[4];
 	double wA=ctes_d[8]*w;
@@ -158,7 +158,6 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *xhi
 		//atomicAdd(&(posz[idx*rows]), zi); // Trajectories z
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 		//printf("Particle %i has initial position %f with phases eta1=%f and eta2=%f\n",idx,yi,ang[3*idx],ang[3*idx+1]);
-		//printf("i=%d\n",i);
 		//printf("zi=%f\n",zi);
 		//printf("ctes_d[26]=%f\n",ctes_d[26]);
 		//printf("rows=%d\n",rows);
@@ -191,14 +190,14 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *xhi
 
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Using Euler %%%%%%%%%%%%%%%%%%%%% */
 			vxii=f(theta[0],phi[0],k[0],xhi[0],eta[0],eta[1],ti,xi,yi,zi,vxi,vzi);
-			for (int j=1;j<*Nk;j++)
+			for (int j=1;j<Nk;j++)
 			{
 				vxii=vxii+f(theta[j],phi[j],k[j],xhi[j],eta[2*j],eta[2*j+1],ti,xi,yi,zi,vyi,vzi);
 			}
 			vxii=vxi+ctes_d[16]*vxii;
 			
 			vyii=g(theta[0],phi[0],k[0],xhi[0],eta[0],eta[1],ti,xi,yi,zi,vxi,vzi);
-			for (int j=1;j<*Nk;j++)
+			for (int j=1;j<Nk;j++)
 			{
 				vyii=vyii+g(theta[j],phi[j],k[j],xhi[j],eta[2*j],eta[2*j+1],ti,xi,yi,zi,vxi,vzi);
 			}
@@ -206,17 +205,20 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *xhi
 			vyii=vyi+ctes_d[16]*vyii;
 			
 			vzii=h(theta[0],phi[0],k[0],xhi[0],eta[0],eta[1],ti,xi,yi,zi,vxi,vyi);
-			for (int j=1;j<*Nk;j++)
+			for (int j=1;j<Nk;j++)
 			{
 				vzii=vzii+h(theta[j],phi[j],k[j],xhi[j],eta[2*j],eta[2*j+1],ti,xi,yi,zi,vxi,vyi);
 			}
 			vzii=vzii+hL(ti,yi,zi,vyi);
 			vzii=vzi+ctes_d[16]*vzii;
 
+			//vyii=vyi+ctes_d[16]*gL(ti,yi,zi,vzi);
+			//vzii=vzi+ctes_d[16]*hL(ti,yi,zi,vyi);
+
 			xii=xi+ctes_d[16]*vxi;
 			yii=yi+ctes_d[16]*vyi;
 			zii=zi+ctes_d[16]*vzi;
-/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */			
+/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 			ti=ti+ctes_d[16];
 			vxi=vxii;
 			vyi=vyii;
@@ -224,10 +226,11 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *xhi
 			xi=xii;
 			yi=yii;
 			zi=zii;
-/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */			
+/* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 			__syncthreads(); // Does it go here?
 		}
 		yi=yi+(ctes_d[18]-ctes_d[17])*vyi/vzi;
+		//printf("yi=%f",yi);
 		pos[idx]=yi;
 	}
 }
@@ -278,7 +281,7 @@ __global__ void kernel_ang ( double *N, curandState* globalState, int n, int i )
 __device__ double genKappa ( double Dk, int i )
 {
 	double kappa=0.0;
-	kappa=pow(ctes_d[12]-ctes_d[19]/2.0,3.0)/(3*(pow(ctes_d[4],3.0)))+(i-1)*Dk;
+	kappa=pow(ctes_d[12]-ctes_d[19]/2.0,3.0)/(3.0*(pow(ctes_d[4],3.0)))+(i-1)*Dk;
 	return kappa;
 }
 
@@ -286,7 +289,7 @@ __global__ void kernel_k ( double *k, double Dkappa, int n )
 {
 	int id = threadIdx.x + TPB * blockIdx.x;
 	double kappa=genKappa(Dkappa,id);
-	k[id]=pow(3*kappa,1.0/3.0);
+	k[id]=pow(3.0*kappa,1.0/3.0);
 }
 
 __global__ void kernel_i ( double *init, curandState* globalState , int n)
@@ -302,7 +305,7 @@ __global__ void kernel_i ( double *init, curandState* globalState , int n)
 __global__ void kernel_eta ( double *eta, curandState* globalState , int n)
 {
 	int id = threadIdx.x + TPB * blockIdx.x;
-	if (id<n)
+	if (id<2*n)
 	{
 		double number = generate(globalState, id, 2);
 		eta[id] = number;
@@ -347,7 +350,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	Dkappa=Dkappa/((double)(*Nk)-1.0);
 	//printf("Dkappa=%lf\n",Dkappa);
 	//double  *phi_d, *pos_d, *posy_d, *posz_d;   // With
-	cudaMemcpyToSymbol(ctes_d, ctes, 29 * sizeof(double), 0, cudaMemcpyHostToDevice);
+	cudaMemcpyToSymbol(ctes_d, ctes, 21 * sizeof(double), 0, cudaMemcpyHostToDevice);
 /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
 	/*printf("Np=%i\n",*Np);
@@ -409,21 +412,9 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	kernel_ang<<<blocks,TPB>>> (xi_d, devStates, *Nk, 2);
 
 //////////////////////////////// RANDOM NUMBERS FOR INITIAL POSITION ///////////////////
-	//curandState* devStates;
-	cudaMalloc ( &devStates, (*Np)*sizeof( curandState ) );
-
-	blocks = (int)ceil((double)(*Np)/TPB);
-
-	// setup seeds
-	srand(time(0));
-	seed = rand();
-	setup_kernels<<<blocks,TPB>>>(devStates,seed);
-
-	cudaMemcpy(init_d, init, sizeof(double) * (*Np), cudaMemcpyHostToDevice );
-	kernel_i<<<blocks,TPB>>> (init_d, devStates, *Np);
-	
+	////////////////// RANDOM PHASES
 	//setup seeds
-	cudaMalloc ( &devStates, 2*(*Np)*sizeof( curandState ) );
+	cudaMalloc ( &devStates, (*Np)*sizeof( curandState ) );
 	blocks = (int)ceil((double)2*(*Np)/TPB);
 
 	srand(time(0));
@@ -432,6 +423,18 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 	cudaMemcpy(eta_d, eta, 2*sizeof(double) * (*Np), cudaMemcpyHostToDevice );
 	kernel_eta<<<blocks,TPB>>> (eta_d, devStates, *Np);
+
+	//////////////// RANDOM INITIAL POSITIONS
+	// setup seeds
+	cudaMalloc ( &devStates, (*Np)*sizeof( curandState ) );
+	blocks = (int)ceil((double)(*Np)/TPB);
+	
+	srand(time(0));
+	seed = rand();
+	setup_kernels<<<blocks,TPB>>>(devStates,seed);
+
+	cudaMemcpy(init_d, init, sizeof(double) * (*Np), cudaMemcpyHostToDevice );
+	kernel_i<<<blocks,TPB>>> (init_d, devStates, *Np);
 
 // copy vectors back from GPU to CPU
 	cudaMemcpy( theta, theta_d, sizeof(double) * (*Nk), cudaMemcpyDeviceToHost );
@@ -455,8 +458,10 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	//cudaMemcpy( posy_d, posy, (*rows) * sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Trajectories y
 	//cudaMemcpy( posz_d, posz, (*rows) * sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Trajectories z
 	cudaMemcpy( pos_d, pos, sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Impact positions
+	//printf("%f",theta[0]);
 
 	particle_path<<<blocks,TPB>>>(theta_d,phi_d,k_d,xi_d,eta_d,init_d,pos_d,*Np,*Nk); // Without
+	//cudaDeviceSynchronize();
 	//particle_path<<<blocks,N>>>(phi_d,pos_d,posy_d,posz_d,*rows,*Np); // With
 
    // copy vectors back from GPU to CPU

@@ -3,7 +3,7 @@ PROGRAM kdfortran
 	
 	INTEGER :: i,N,Nk
 !	INTEGER(4) :: rows
-	REAL(8) :: dt,D,zimp,v0,wL,Damping,Delta,E0L,E0zpf
+	REAL(8) :: dt,D,zimp,v0,wL,Damping,Delta,E0L
 	!REAL(8), DIMENSION(3*N) :: phi
 	!REAL(8), DIMENSION(N,3) :: ang ! Table of randomly generated numbers (cols 1 and 2 from uniform and 3 from normal distribution)
         REAL(8), ALLOCATABLE :: theta(:)
@@ -25,7 +25,7 @@ PROGRAM kdfortran
 	LOGICAL :: e
 	REAL(8) :: start,finish
 	
-	N=1024						! Number of particles
+	N=1						! Number of particles
 	dt=1d-17					! Time step in seconds
 	D=125d-6						! Laser beam waist in meters
 	zimp=24d-2+D						! Distance from laser to screen in meters
