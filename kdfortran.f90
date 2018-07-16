@@ -25,7 +25,7 @@ PROGRAM kdfortran
 	LOGICAL :: e
 	REAL(8) :: start,finish
 	
-	N=1						! Number of particles
+	N=10240						! Number of particles
 	dt=1d-17					! Time step in seconds
 	D=125d-6						! Laser beam waist in meters
 	zimp=24d-2+D						! Distance from laser to screen in meters
@@ -36,7 +36,7 @@ PROGRAM kdfortran
         Damping=6.245835d-24
 	PRINT*,"Damping=",Damping,"s"
         Delta=Damping*(wL**2d0)
-        Nk=100
+        Nk=1000
         PRINT*,"Delta=",Delta,"1/s"
 
         ALLOCATE(theta(Nk))

@@ -145,8 +145,8 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *xhi
 	if (idx<N){
 		double ti=0.0;
 		double xi=0.0;
-		//double yi=init[idx];
-		double yi=0.5e-5;
+		double yi=init[idx];
+		//double yi=0.0;
 		double zi=0.0;
 		double vxi=0.0;
 		double vyi=0.0;
@@ -347,8 +347,8 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	double *theta_d, *phi_d, *k_d, *xi_d;
 	double *eta_d;
 	double Dkappa;
-	double wres=ctes[9]; // Resonance around w_Compton
-	//double wres=ctes[12]; // Resonance around w_Laser
+	//double wres=ctes[9]; // Resonance around w_Compton
+	double wres=ctes[12]; // Resonance around w_Laser
 	Dkappa=(pow(wres+ctes[19]/2.0,3.0)-pow(wres-ctes[19]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression (Vk)
 	printf("Vk=%.10e\n",4.0*ctes[0]*Dkappa);
 	ctes[20]=2.0*pow(ctes[0],2.0)*(*Nk)/Dkappa; // V <---------- and this one
