@@ -3,7 +3,7 @@ PROGRAM kdfortran
 	
 	INTEGER :: i,N,Nk
 !	INTEGER(4) :: rows
-	REAL(8) :: dt,D,zimp,v0,wL,Damping,Delta,E0L
+	REAL(8) :: dt,D,zimp,v0,wL,wres,Damping,Delta,E0L
 	!REAL(8), DIMENSION(3*N) :: phi
 	!REAL(8), DIMENSION(N,3) :: ang ! Table of randomly generated numbers (cols 1 and 2 from uniform and 3 from normal distribution)
         REAL(8), ALLOCATABLE :: theta(:)
@@ -33,10 +33,13 @@ PROGRAM kdfortran
 	E0L=2d8						! Laser electric field
 	!E0zpf=E0L/1d2						! ZPF electric field
         wL=3.54d15
+	wres=wL
+!	wres=(9.10938356d-31)*((299792458d0)**2d0)/(1.0545718d-34)
+
         Damping=6.245835d-24
 	PRINT*,"Damping=",Damping,"s"
-        Delta=Damping*(wL**2d0)
-        Nk=1000
+        Delta=100*Damping*(wres**2d0)
+        Nk=20000
         PRINT*,"Delta=",Delta,"1/s"
 
         ALLOCATE(theta(Nk))
@@ -45,7 +48,7 @@ PROGRAM kdfortran
         ALLOCATE(xi(Nk))
 	
 	1 FORMAT(E18.10) !Must be an 8-digit difference between the number after the E and the number of digits after the decimal dot
-        2 FORMAT(E30.22,',',E18.10,',',E18.10,',',E18.10)
+        2 FORMAT(E30.22,',',E18.10,',',E18.10,',',E18.10';')
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 	!2 FORMAT(<2*N>E11.3) ! Trajectories
 	!3 FORMAT(E18.10) ! Screen
@@ -100,7 +103,7 @@ PROGRAM kdfortran
 
 
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-	CALL kernel_wrapper(init,pos,N,theta,phi,k,xi,eta,dt,D,zimp,v0,wL,Delta,Nk,E0L) ! Without
+	CALL kernel_wrapper(init,pos,N,theta,phi,k,xi,eta,dt,D,zimp,v0,wL,wres,Delta,Nk,E0L) ! Without
 	!CALL kernel_wrapper(phi,pos,posy,posz,rows,N,dt,D,zimp,v0,E0) ! With
 ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

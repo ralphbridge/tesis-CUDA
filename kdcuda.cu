@@ -146,7 +146,7 @@ __global__ void particle_path(double *theta, double *phi, double *k, double *xhi
 		double ti=0.0;
 		double xi=0.0;
 		double yi=init[idx];
-		//double yi=0.0;
+		//double yi=0.5e-5;
 		double zi=0.0;
 		double vxi=0.0;
 		double vyi=0.0;
@@ -313,10 +313,10 @@ __global__ void kernel_eta ( double *eta, curandState* globalState , int n)
 	}
 }
 // function called from main fortran program
-extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *theta, double *phi, double *k, double *xi, double *eta, double *dt, double *D, double *zimp, double *v0, double *wL, double *Delta, int *Nk, double *E0L)
+extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *theta, double *phi, double *k, double *xi, double *eta, double *dt, double *D, double *zimp, double *v0, double *wL, double *wres, double *Delta, int *Nk, double *E0L)
 //extern "C" void kernel_wrapper_(double *phi, double *pos, double *posy, double *posz, int *rows, int *Np, double *dt, double *D, double *zimp, double *v0, double *E0) // Should I provide this variables as pointers or not?
 {
-	cudaSetDevice(0);
+	cudaSetDevice(1);
 	ctes[0]=3.1415926535; // PI
 	ctes[1]=1.6e-19; // q
 	ctes[2]=9.10938356e-31; // m
@@ -347,9 +347,9 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	double *theta_d, *phi_d, *k_d, *xi_d;
 	double *eta_d;
 	double Dkappa;
-	//double wres=ctes[9]; // Resonance around w_Compton
-	double wres=ctes[12]; // Resonance around w_Laser
-	Dkappa=(pow(wres+ctes[19]/2.0,3.0)-pow(wres-ctes[19]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression (Vk)
+	printf("w_res=%.10e\n",*wres);
+
+	Dkappa=(pow(*wres+ctes[19]/2.0,3.0)-pow(*wres-ctes[19]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression (Vk)
 	printf("Vk=%.10e\n",4.0*ctes[0]*Dkappa);
 	ctes[20]=2.0*pow(ctes[0],2.0)*(*Nk)/Dkappa; // V <---------- and this one
 	printf("V=%.10e\n",ctes[20]);
@@ -410,7 +410,8 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 
 //////////////////////////////// k radii (not random) ///////////////////////////////
 	cudaMemcpy(k_d, k, sizeof(double) * (*Nk), cudaMemcpyHostToDevice );
-	kernel_k<<<blocks,TPB>>> (k_d, wres, Dkappa, *Nk);
+	printf("Dkappa=%.10e\n",Dkappa);
+	kernel_k<<<blocks,TPB>>> (k_d, *wres, Dkappa, *Nk);
 	// xi random generation
 	/*srand(time(0));
 	seed = rand();
@@ -467,7 +468,7 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	cudaMemcpy( pos_d, pos, sizeof(double) * (*Np), cudaMemcpyHostToDevice ); // Impact positions
 	//printf("%f",theta[0]);
 
-	particle_path<<<blocks,TPB>>>(theta_d,phi_d,k_d,xi_d,eta_d,init_d,pos_d,*Np,*Nk); // Without
+//	particle_path<<<blocks,TPB>>>(theta_d,phi_d,k_d,xi_d,eta_d,init_d,pos_d,*Np,*Nk); // Without
 	//cudaDeviceSynchronize();
 	//particle_path<<<blocks,N>>>(phi_d,pos_d,posy_d,posz_d,*rows,*Np); // With
 
