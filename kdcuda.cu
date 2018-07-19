@@ -349,11 +349,11 @@ extern "C" void kernel_wrapper_(double *init, double *pos, int *Np, double *thet
 	double Dkappa;
 	printf("w_res=%.10e\n",*wres);
 
-	Dkappa=(pow(*wres+ctes[19]/2.0,3.0)-pow(*wres-ctes[19]/2.0,3.0))/(3.0*pow(ctes[4],3.0)); // <-------------- check this expression (Vk)
-	printf("Vk=%.10e\n",4.0*ctes[0]*Dkappa);
-	ctes[20]=2.0*pow(ctes[0],2.0)*(*Nk)/Dkappa; // V <---------- and this one
+	Dkappa=(pow(*wres+ctes[19]/2.0,3.0)-pow(*wres-ctes[19]/2.0,3.0))/(3.0*pow(ctes[4],3.0));
+	printf("Vk=%.10e\n",4.0*ctes[0]*Dkappa);// Vk
+	ctes[20]=2.0*pow(ctes[0],2.0)*(*Nk)/Dkappa; // V 
 	printf("V=%.10e\n",ctes[20]);
-	printf("EL_i=%.10e\n",sqrt(ctes[3]*ctes[12]/(ctes[5]*ctes[20])));
+	printf("Average EL_i=%.10e\n",sqrt(ctes[3]*(*wres)/(ctes[5]*ctes[20])));
 	Dkappa=Dkappa/((double)(*Nk)-1.0);
 	//printf("Dkappa=%lf\n",Dkappa);
 	//double  *phi_d, *pos_d, *posy_d, *posz_d;   // With

@@ -25,21 +25,21 @@ PROGRAM kdfortran
 	LOGICAL :: e
 	REAL(8) :: start,finish
 	
-	N=10240						! Number of particles
+	N=1						! Number of particles
 	dt=1d-17					! Time step in seconds
 	D=125d-6						! Laser beam waist in meters
 	zimp=24d-2+D						! Distance from laser to screen in meters
 	v0=1.1d7						! Electron velocity
 	E0L=2d8						! Laser electric field
-	!E0zpf=E0L/1d2						! ZPF electric field
         wL=3.54d15
+!       RESONANCE FREQUENCY FOR THE SHARP RESONANCE CONDITION
 	wres=wL
-!	wres=(9.10938356d-31)*((299792458d0)**2d0)/(1.0545718d-34)
+!	wres=(9.10938356d-31)*((299792458d0)**2d0)/(1.0545718d-34) // wC ~ 7.8e20 rad/s
 
         Damping=6.245835d-24
 	PRINT*,"Damping=",Damping,"s"
         Delta=100*Damping*(wres**2d0)
-        Nk=20000
+        Nk=10000
         PRINT*,"Delta=",Delta,"1/s"
 
         ALLOCATE(theta(Nk))
