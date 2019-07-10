@@ -8,7 +8,7 @@
 # define TPB 128
 
 const int N=10000; // Number of electrons
-const int Nk=200; // Number of k-modes
+const int Nk=1000000; // Number of k-modes
 const int Ne=10; // Number of polarizations per k-mode
 
 __constant__ int N_d;
@@ -55,6 +55,8 @@ int main(){
 }
 
 void onHost(){
+	FILE *k_vec;
+	k_vec=fopen("k-vectors.txt","w");
 	/*double *init_h,*pos_h; // Initial and final positions (h indicates host allocation)
 	double *eta_h; // Random phases for the ZPF k-modes (2N in total)*/
 	double *k_h,*theta_h,*phi_h; // Spherical coordinates for each k-mode (Nk in total)
@@ -64,22 +66,26 @@ void onHost(){
 	pos_h=(double*)malloc(N);
 	eta_h=(double*)malloc(2*N);*/
 
-	k_h=(double*)malloc(Nk);
-	theta_h=(double*)malloc(Nk);
-	phi_h=(double*)malloc(Nk);
+	k_h=(double*)malloc(Nk*sizeof(double));
+	theta_h=(double*)malloc(Nk*sizeof(double));
+	phi_h=(double*)malloc(Nk*sizeof(double));
 
 	//xi_h=(double*)malloc(Ne);
 
 	onDevice(k_h,theta_h,phi_h);
 
+	for(int i=0;i<Nk;i++){
+		fprintf(k_vec,"%f,%f,%f\n",k_h[i],theta_h[i],phi_h[i]);
+	}
+	fclose(k_vec);
+
 	/*free(init_h);
 	free(pos_h);
-	free(eta_h);
+	free(eta_h);*/
 	free(k_h);
 	free(theta_h);
 	free(phi_h);
-	free(xi_h);*/
-
+	//free(xi_h);
 }
 
 void onDevice(double *k_h,double *theta_h,double *phi_h){
@@ -172,26 +178,14 @@ void onDevice(double *k_h,double *theta_h,double *phi_h){
 	kmodes<<<blocks,TPB>>>(k_d,devStates,1);
 
 	//theta
-        srand(time(0));
-        seed=rand();
-        setup_kmodes<<<blocks,TPB>>>(devStates,seed);
-
 	kmodes<<<blocks,TPB>>>(theta_d,devStates,2);
 
 	//phi
-	srand(time(0));
-	seed=rand();
-	setup_kmodes<<<blocks,TPB>>>(devStates,seed);
-
 	kmodes<<<blocks,TPB>>>(phi_d,devStates,3);
 
-	//cudaMemcpy(k_h,k_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
-	//cudaMemcpy(theta_h,theta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
-	//cudaMemcpy(phi_h,phi_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
-
-	/*for(int i=0;i<Nk;i++){
-		printf("%d\t %f,%f,%f\n",i,k_h[i],theta_h[i],phi_h[i]);
-	}*/
+	cudaMemcpy(k_h,k_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
+	cudaMemcpy(theta_h,theta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
+	cudaMemcpy(phi_h,phi_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 
 	/*cudaFree(init_d);
 	cudaFree(pos_d);
@@ -211,14 +205,12 @@ __global__ void kmodes(double *vec,curandState *globalState,int opt){
 	curandState localState=globalState[idx];
 	if(idx<Nk_d){
 		if(opt==1){
-			vec[idx]=pow((pow(kmax,3.0)-pow(kmin,3.0))*curand_uniform(&localState)+pow(kmin,3.0),1.0/3.0);
-			printf("k[%d]=%f\n",idx,vec[idx]);
+			vec[idx]=pow((pow(kmax,3.0)-pow(kmin,3.0))*curand_uniform(&localState)+pow(kmin,3.0),1.0/3.0); // Random radii
 		}else if(opt==2){
-			vec[idx]=acos(1.0-2.0*curand_uniform(&localState));
-			printf("theta[%d]=%f\n",idx,vec[idx]);
+			vec[idx]=acos(1.0-2.0*curand_uniform(&localState)); // Random polar angles
 		}else if(opt==3){
-			vec[idx]=2.0*pi*curand_uniform(&localState);
-			printf("phi[%d]=%f\n",idx,vec[idx]);
+			vec[idx]=2.0*pi*curand_uniform(&localState); // Random azimuthal angles
 		}
+		globalState[idx]=localState; // Update current seed state
 	}
 }
