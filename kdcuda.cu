@@ -5,15 +5,11 @@
 #include<curand_kernel.h>
 #include"math.h"
 
-# define TPB 128
+#define TPB 16
 
-const int N=10000; // Number of electrons
-const int Nk=1000000; // Number of k-modes
-const int Ne=10; // Number of polarizations per k-mode
-
-__constant__ int N_d;
-__constant__ int Nk_d;
-__constant__ int Ne_d;
+#define N 30 // Number of electrons
+#define Nk 20 // Number of k-modes
+#define Ne 10 // Number of polarizations per k-mode
 
 __constant__ double pi;
 __constant__ double q; // electron charge
@@ -45,9 +41,9 @@ __constant__ double kmax;
 __constant__ double dt; // time step necessary to resolve the electron trajectory
 
 void onHost();
-void onDevice(double *k,double *theta,double *phi);
+void onDevice(double *k,double *theta,double *phi,double *eta,double *xi);
 __global__ void setup_kmodes(curandState *state,unsigned long seed);
-__global__ void kmodes(double *x,curandState *state,int option);
+__global__ void kmodes(double *x,curandState *state,int option,int n);
 
 int main(){
 	onHost();
@@ -57,41 +53,43 @@ int main(){
 void onHost(){
 	FILE *k_vec;
 	k_vec=fopen("k-vectors.txt","w");
-	/*double *init_h,*pos_h; // Initial and final positions (h indicates host allocation)
-	double *eta_h; // Random phases for the ZPF k-modes (2N in total)*/
-	double *k_h,*theta_h,*phi_h; // Spherical coordinates for each k-mode (Nk in total)
-	//double *xi_h; // Random polarization angles for each k-mode (Ne in total)
 
-	/*init_h=(double*)malloc(N);
-	pos_h=(double*)malloc(N);
-	eta_h=(double*)malloc(2*N);*/
+	double *k_h,*theta_h,*phi_h; // Spherical coordinates for each k-mode (Nk in total)
+	double *xi_h; // Polarization angles for each k-mode (Ne in total): NOT random
+	double *eta_h; // Random phases for the ZPF k-modes (2N in total)
+	//double *init_h,*pos_h; // Initial and final positions (h indicates host allocation)
 
 	k_h=(double*)malloc(Nk*sizeof(double));
 	theta_h=(double*)malloc(Nk*sizeof(double));
 	phi_h=(double*)malloc(Nk*sizeof(double));
 
-	//xi_h=(double*)malloc(Ne);
+	xi_h=(double*)malloc(Ne*sizeof(double));
 
-	onDevice(k_h,theta_h,phi_h);
+	eta_h=(double*)malloc(2*N*sizeof(double));
+
+	/*init_h=(double*)malloc(N);
+	pos_h=(double*)malloc(N);*/
+
+	onDevice(k_h,theta_h,phi_h,eta_h,xi_h);
 
 	for(int i=0;i<Nk;i++){
 		fprintf(k_vec,"%f,%f,%f\n",k_h[i],theta_h[i],phi_h[i]);
 	}
 	fclose(k_vec);
 
-	/*free(init_h);
-	free(pos_h);
-	free(eta_h);*/
 	free(k_h);
 	free(theta_h);
 	free(phi_h);
-	//free(xi_h);
+	free(xi_h);
+	free(eta_h);
+	/*free(init_h);
+	free(pos_h);*/
 }
 
-void onDevice(double *k_h,double *theta_h,double *phi_h){
+void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi_h){
 	/*const int block_calc=(Nk+TPB-1)/TPB;
 	const int blocks=(Nk<block_calc ? 32:block_calc); // Maximum number of resident blocks per SM: 32*/
-	const int blocks=(Nk+TPB-1)/TPB;
+	unsigned int blocks=(Nk+TPB-1)/TPB;
 
 	double pi_h=3.1415926535;
 	double q_h=1.6e-19;
@@ -146,24 +144,24 @@ void onDevice(double *k_h,double *theta_h,double *phi_h){
 	cudaMemcpyToSymbol(kmax,&kmax_h,sizeof(double));
 	cudaMemcpyToSymbol(dt,&dt_h,sizeof(double));
 
-	//double *pos_d,*init_d; // Vectors in Device (d indicates device allocation)
-	//double *eta_d;
 	double *theta_d,*phi_d,*k_d;
-	//double *xi_d;
+	double *xi_d;
+	double *eta_d;
+	//double *pos_d,*init_d; // Vectors in Device (d indicates device allocation)
 
 	printf("Number of particles: %d\n",N);
 	printf("Number of k-modes: %d\n",Nk);
 	printf("Number of polarizations: %d\n",Ne);
 	printf("Threads per block: %d\n",TPB);
-	printf("Number of blocks: %d\n",blocks);
+	printf("Number of blocks (k-modes): %d\n",blocks);
 
 	cudaMalloc((void**)&k_d,Nk*sizeof(double));
 	cudaMalloc((void**)&theta_d,Nk*sizeof(double));
 	cudaMalloc((void**)&phi_d,Nk*sizeof(double));
 
-	cudaMemcpyToSymbol(N_d,&N,sizeof(int));
-	cudaMemcpyToSymbol(Nk_d,&Nk,sizeof(int));
-	cudaMemcpyToSymbol(Ne_d,&Ne,sizeof(int));
+	cudaMalloc((void**)&eta_d,2*N*sizeof(double));
+
+	cudaMalloc((void**)&xi_d,Ne*sizeof(double));
 
 	/* Randomly generated k-modes inside the spherical shell */
 
@@ -175,24 +173,51 @@ void onDevice(double *k_h,double *theta_h,double *phi_h){
 	int seed=rand(); //Setting up the seeds
 	setup_kmodes<<<blocks,TPB>>>(devStates,seed);
 
-	kmodes<<<blocks,TPB>>>(k_d,devStates,1);
+	kmodes<<<blocks,TPB>>>(k_d,devStates,1,Nk);
 
 	//theta
-	kmodes<<<blocks,TPB>>>(theta_d,devStates,2);
+	kmodes<<<blocks,TPB>>>(theta_d,devStates,2,Nk);
 
 	//phi
-	kmodes<<<blocks,TPB>>>(phi_d,devStates,3);
+	kmodes<<<blocks,TPB>>>(phi_d,devStates,3,Nk);
 
 	cudaMemcpy(k_h,k_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 	cudaMemcpy(theta_h,theta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 	cudaMemcpy(phi_h,phi_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 
-	/*cudaFree(init_d);
-	cudaFree(pos_d);
-	cudaFree(eta_d);*/
+	/* Randomly generated phases for the CPC modes */
+
+	curandState *devStates_n;
+	cudaMalloc(&devStates_n,2*N*sizeof(curandState));
+
+	blocks=(2*N+TPB-1)/TPB;
+	printf("Number of blocks (phases): %d\n",blocks);
+
+	//eta
+	srand(time(NULL));
+	seed=rand(); //Settin up seeds
+	setup_kmodes<<<blocks,TPB>>>(devStates_n,seed);
+
+	kmodes<<<blocks,TPB>>>(eta_d,devStates_n,3,2*N);
+
+	cudaMemcpy(eta_h,eta_d,Ne*sizeof(double),cudaMemcpyDeviceToHost);
+
+	/* Polarization modes allocation (in device memory) */
+	for(int i=0;i<Ne;i++){
+		xi_h[i]=i*2*pi_h/Ne;
+	}
+
+	cudaMemcpy(xi_d,xi_h,Ne*sizeof(double),cudaMemcpyHostToDevice);
+
+	cudaFree(devStates);
+	cudaFree(devStates_n);
 	cudaFree(k_d);
 	cudaFree(theta_d);
 	cudaFree(phi_d);
+	cudaFree(xi_d);
+	cudaFree(eta_d);
+	/*cudaFree(init_d);
+	cudaFree(pos_d);*/
 }
 
 __global__ void setup_kmodes(curandState *state,unsigned long seed){
@@ -200,10 +225,10 @@ __global__ void setup_kmodes(curandState *state,unsigned long seed){
         curand_init(seed,idx,0,&state[idx]);
 }
 
-__global__ void kmodes(double *vec,curandState *globalState,int opt){
+__global__ void kmodes(double *vec,curandState *globalState,int opt,int n){
 	int idx=threadIdx.x+blockIdx.x*blockDim.x;
 	curandState localState=globalState[idx];
-	if(idx<Nk_d){
+	if(idx<n){
 		if(opt==1){
 			vec[idx]=pow((pow(kmax,3.0)-pow(kmin,3.0))*curand_uniform(&localState)+pow(kmin,3.0),1.0/3.0); // Random radii
 		}else if(opt==2){
