@@ -19,6 +19,7 @@ __constant__ double hbar;
 __constant__ double c; // velocity of light in vacuum
 __constant__ double eps0;
 __constant__ double v0; // electron velocity before laser region
+__constant__ double sigma; // electron beam standard deviation
 //__constant__ double beta=v0/c;
 //__constant__ double gamma=1.0;//pow(1.0-pow(beta,2.0),-0.5);
 
@@ -41,9 +42,14 @@ __constant__ double kmax;
 __constant__ double dt; // time step necessary to resolve the electron trajectory
 
 void onHost();
-void onDevice(double *k,double *theta,double *phi,double *eta,double *xi);
+void onDevice(double *k,double *theta,double *phi,double *eta,double *xi,double *init,double *pos);
 __global__ void setup_kmodes(curandState *state,unsigned long seed);
 __global__ void kmodes(double *x,curandState *state,int option,int n);
+__global__ void paths_rk2(double *k,double *theta,double *phi,double *xi,double *eta,double *init,double *pos);
+__global__ void paths_rk4(double *k,double *theta,double *phi,double *xi,double *eta,double *init,double *pos);
+__device__ double f(double k,double theta,double phi,double xi,double eta1,double eta2,double t,double x,double y,double z,double vy,double vz);
+__device__ double g(double k,double theta,double phi,double xi,double eta1,double eta2,double t,double x,double y,double z,double vx,double vz);
+__device__ double h(double k,double theta,double phi,double xi,double eta1,double eta2,double t,double x,double y,double z,double vx,double vy);
 
 int main(){
 	onHost();
@@ -51,13 +57,12 @@ int main(){
 }
 
 void onHost(){
-	FILE *k_vec;
-	k_vec=fopen("k-vectors.txt","w");
+	FILE *k_vec,*posit;
 
 	double *k_h,*theta_h,*phi_h; // Spherical coordinates for each k-mode (Nk in total)
 	double *xi_h; // Polarization angles for each k-mode (Ne in total): NOT random
 	double *eta_h; // Random phases for the ZPF k-modes (2N in total)
-	//double *init_h,*pos_h; // Initial and final positions (h indicates host allocation)
+	double *init_h,*pos_h; // Initial and final positions (h indicates host allocation)
 
 	k_h=(double*)malloc(Nk*sizeof(double));
 	theta_h=(double*)malloc(Nk*sizeof(double));
@@ -67,26 +72,33 @@ void onHost(){
 
 	eta_h=(double*)malloc(2*N*sizeof(double));
 
-	/*init_h=(double*)malloc(N);
-	pos_h=(double*)malloc(N);*/
+	init_h=(double*)malloc(N*sizeof(double));
+	pos_h=(double*)malloc(N*sizeof(double));
 
-	onDevice(k_h,theta_h,phi_h,eta_h,xi_h);
+	onDevice(k_h,theta_h,phi_h,eta_h,xi_h,init_h,pos_h);
 
+	k_vec=fopen("k-vectors.txt","w");
 	for(int i=0;i<Nk;i++){
 		fprintf(k_vec,"%f,%f,%f\n",k_h[i],theta_h[i],phi_h[i]);
 	}
 	fclose(k_vec);
+
+	posit=fopen("positions.txt","w");
+	for(int i=0;i<N;i++){
+		fprintf(posit,"%f,%f\n",init_h[i],pos_h[i]);
+	}
+	fclose(posit);
 
 	free(k_h);
 	free(theta_h);
 	free(phi_h);
 	free(xi_h);
 	free(eta_h);
-	/*free(init_h);
-	free(pos_h);*/
+	free(init_h);
+	free(pos_h);
 }
 
-void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi_h){
+void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi_h,double *init_h,double *pos_h){
 	/*const int block_calc=(Nk+TPB-1)/TPB;
 	const int blocks=(Nk<block_calc ? 32:block_calc); // Maximum number of resident blocks per SM: 32*/
 	unsigned int blocks=(Nk+TPB-1)/TPB;
@@ -99,6 +111,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 	double c_h=299792458.0;
 	double eps0_h=8.85e-12;
 	double v0_h=1.1e7;
+	double fwhm_h=25e-6;
+	double sigma_h=fwhm/(2.0*sqrt(2.0*log(2.0)));
 
 	double wC_h=m_h*pow(c_h,2.0)/hbar_h;
 	double kC_h=wC_h/c_h;
@@ -125,6 +139,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 	cudaMemcpyToSymbol(c,&c_h,sizeof(double));
 	cudaMemcpyToSymbol(eps0,&eps0_h,sizeof(double));
 	cudaMemcpyToSymbol(v0,&v0_h,sizeof(double));
+	cudaMemcpyToSymbol(sigma,&sigma_h,sizeof(double));
 
 	cudaMemcpyToSymbol(wC,&wC_h,sizeof(double));
 	cudaMemcpyToSymbol(kC,&kC_h,sizeof(double));
@@ -147,7 +162,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 	double *theta_d,*phi_d,*k_d;
 	double *xi_d;
 	double *eta_d;
-	//double *pos_d,*init_d; // Vectors in Device (d indicates device allocation)
+	double *pos_d,*init_d; // Vectors in Device (d indicates device allocation)
 
 	printf("Number of particles: %d\n",N);
 	printf("Number of k-modes: %d\n",Nk);
@@ -162,6 +177,9 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 	cudaMalloc((void**)&eta_d,2*N*sizeof(double));
 
 	cudaMalloc((void**)&xi_d,Ne*sizeof(double));
+
+	cudaMalloc((void**)&init_d,N*sizeof(double));
+	cudaMalloc((void**)&pos_d,N*sizeof(double));
 
 	/* Randomly generated k-modes inside the spherical shell */
 
@@ -207,7 +225,17 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 		xi_h[i]=i*2*pi_h/Ne;
 	}
 
-	cudaMemcpy(xi_d,xi_h,Ne*sizeof(double),cudaMemcpyHostToDevice);
+	/* Initial positions */
+
+	blocks=(N+TPB-1)/TPB;
+	printf("Number of blocks (paths): %d\n",blocks);
+
+	kmodes<<<blocks,TPB>>>(init_d,devStates_n,4,N);
+
+	paths_rk2<<<blocks,TPB>>>(k_d,theta_d,phi_d,xi_d,eta_d,init_d,pos_d);
+	//paths_rk4<<<blocks,TPB>>>(k_d,theta_d,phi_d,xi_d,eta_d,init_d,pos_d);
+
+	cudaMemcpy(pos_h,pos_d,N*sizeof(double),cudaMemcpyDeviceToHost);
 
 	cudaFree(devStates);
 	cudaFree(devStates_n);
@@ -216,8 +244,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 	cudaFree(phi_d);
 	cudaFree(xi_d);
 	cudaFree(eta_d);
-	/*cudaFree(init_d);
-	cudaFree(pos_d);*/
+	cudaFree(init_d);
+	cudaFree(pos_d);
 }
 
 __global__ void setup_kmodes(curandState *state,unsigned long seed){
@@ -235,7 +263,47 @@ __global__ void kmodes(double *vec,curandState *globalState,int opt,int n){
 			vec[idx]=acos(1.0-2.0*curand_uniform(&localState)); // Random polar angles
 		}else if(opt==3){
 			vec[idx]=2.0*pi*curand_uniform(&localState); // Random azimuthal angles
+		}else if(opt==4){
+			vec[idx]=sigma*curand_normal(&localState); // Random initial positions
 		}
 		globalState[idx]=localState; // Update current seed state
 	}
+}
+
+__global__ void paths_rk2(double *k,double *theta,double *phi,double *xi,double *eta,double *init,double *pos){
+	unsigned int idx=threadIdx.x+blockIdx.x*blockDim.x;
+	double tn=0.0;
+	double xn=0.0;
+	double yn=init[idx];
+	double zn=0.0;
+	double vxn=0.0;
+	double vyn=0.0;
+	double vzn=v0;
+	double xnn,ynn,znn,vxnn,vynn,vznn;
+	double k1vx,k2vx,k1vy,k2vy,k1vz,k2vz;
+}
+
+__global__ void paths_rk4(double *k,double *theta,double *phi,double *xi,double *eta,double *init,double *pos){
+	unsigned int idx=threadIdx.x+blockIdx.x*blockDim.x;
+	double tn=0.0;
+	double xn=0.0;
+	double yn=init[idx];
+	double zn=0.0;
+	double vxn=0.0;
+	double vyn=0.0;
+	double vzn=v0;
+	double xnn,ynn,znn,vxnn,vynn,vznn;
+	double k1vx,k2vx,k1vy,k2vy,k1vz,k2vz,k3vx,k3vy,k3vz,k4vx,k4vy,k4vz;
+}
+
+__device__ double f(double k,double theta,double phi,double xi,double eta1,double eta2,double t,double x,double y,double z,double vy,double vz){
+
+}
+
+__device__ double g(double k,double theta,double phi,double xi,double eta1,double eta2,double t,double x,double y,double z,double vx,double vz){
+
+}
+
+__device__ double h(double k,double theta,double phi,double xi,double eta1,double eta2,double t,double x,double y,double z,double vx,double vy){
+
 }
