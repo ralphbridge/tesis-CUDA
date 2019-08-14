@@ -14,8 +14,7 @@
 __constant__ double pi;
 __constant__ double q; // electron charge
 __constant__ double m; // electron rest mass
-//__constant__ double hbar=0.0; // use this to see "classical" results
-__constant__ double hbar;
+__constant__ double hbar; // Planck's constant
 __constant__ double c; // velocity of light in vacuum
 __constant__ double eps0;
 __constant__ double v0; // electron velocity before laser region
@@ -23,9 +22,9 @@ __constant__ double sigma; // electron beam standard deviation
 //__constant__ double beta=v0/c;
 //__constant__ double gamma=1.0;//pow(1.0-pow(beta,2.0),-0.5);
 
-__constant__ double wC; // Compton frequency
-__constant__ double kC; // kC=wC/c
-__constant__ double lamC; // lamC=2pi/kC
+//__constant__ double wC; // Compton frequency
+//__constant__ double kC; // kC=wC/c
+//__constant__ double lamC; // lamC=2pi/kC
 
 __constant__ double wL; // Laser frequency
 __constant__ double kL; // kL=wL/c
@@ -34,7 +33,7 @@ __constant__ double lamL; // lamL=2pi/kL
 __constant__ double E0L; // Laser electric field intensity amplitude
 __constant__ double D; // Laser beam waist
 __constant__ double zimp; // Screen position (origin set right before laser region)
-//__constant__ double sigmaL; // laser region standard deviation
+__constant__ double sigmaL; // laser region standard deviation
 
 __constant__ double damping; // Damping rate (harmonic oscillator approximation)
 __constant__ double Delta; // thickness of the spherical shell in k-space
@@ -49,6 +48,7 @@ void onDevice(double *k,double *theta,double *phi,double *eta,double *xi,double 
 
 __global__ void setup_kmodes(curandState *state,unsigned long seed);
 __global__ void kmodes(double *x,curandState *state,int option,int n);
+__global__ void paths_euler(double *k,double *theta,double *phi,double *xi,double *eta,double *init,double *pos);
 __global__ void paths_rk2(double *k,double *theta,double *phi,double *xi,double *eta,double *init,double *pos);
 __global__ void paths_rk4(double *k,double *theta,double *phi,double *xi,double *eta,double *init,double *pos);
 
@@ -113,17 +113,17 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 	double pi_h=3.1415926535;
 	double q_h=1.6e-19;
 	double m_h=9.10938356e-31;
-	double hbar_h=1.0545718e-34;
-//	double hbar=0; // uncomment this line to see classical results
+//	double hbar_h=1.0545718e-34;
+	double hbar_h=0; // uncomment this line to see classical results
 	double c_h=299792458.0;
 	double eps0_h=8.85e-12;
 	double v0_h=1.1e7;
 	double fwhm_h=25e-6;
 	double sigma_h=fwhm_h/(2.0*sqrt(2.0*log(2.0)));
 
-	double wC_h=m_h*pow(c_h,2.0)/hbar_h;
-	double kC_h=wC_h/c_h;
-	double lamC_h=2*pi_h/kC_h;
+	//double wC_h=m_h*pow(c_h,2.0)/hbar_h;
+	//double kC_h=wC_h/c_h;
+	//double lamC_h=2*pi_h/kC_h;
 
 	double lamL_h=532e-9;
 	double kL_h=2*pi_h/lamL_h;
@@ -132,14 +132,14 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 	double E0L_h=2.6e8;
 	double D_h=125e-6;
 	double zimp_h=24e-2+D_h;
-//	double sigmaL_h=?; // <---------------- An extra free parameter ?
+	double sigmaL_h=26e-6;
 
 	double damping_h=6.245835e-24;
 	double Delta_h=1e7*damping_h*pow(wL_h,2.0);
 	double kmin_h=(wL_h-Delta_h/2.0)/c_h;
 	double kmax_h=(wL_h+Delta_h/2.0)/c_h;
-	double Vk=4.0*pi_h*(pow(kmax,3.0)-pow(kmin,3.0))/3.0;
-	double V_h=pow(2.0*pi_h,3.0)*Nk/Vk;
+	double Vk_h=4.0*pi_h*(pow(kmax_h,3.0)-pow(kmin_h,3.0))/3.0;
+	double V_h=pow(2.0*pi_h,3.0)*Nk/Vk_h;
 
 	double dt_h=pi_h/(10.0*(wL_h+Delta_h/2.0));
 
@@ -152,9 +152,9 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 	cudaMemcpyToSymbol(v0,&v0_h,sizeof(double));
 	cudaMemcpyToSymbol(sigma,&sigma_h,sizeof(double));
 
-	cudaMemcpyToSymbol(wC,&wC_h,sizeof(double));
-	cudaMemcpyToSymbol(kC,&kC_h,sizeof(double));
-	cudaMemcpyToSymbol(lamC,&lamC_h,sizeof(double));
+	//cudaMemcpyToSymbol(wC,&wC_h,sizeof(double));
+	//cudaMemcpyToSymbol(kC,&kC_h,sizeof(double));
+	//cudaMemcpyToSymbol(lamC,&lamC_h,sizeof(double));
 
 	cudaMemcpyToSymbol(lamL,&lamL_h,sizeof(double));
 	cudaMemcpyToSymbol(kL,&kL_h,sizeof(double));
@@ -163,7 +163,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 	cudaMemcpyToSymbol(E0L,&E0L_h,sizeof(double));
 	cudaMemcpyToSymbol(D,&D_h,sizeof(double));
 	cudaMemcpyToSymbol(zimp,&zimp_h,sizeof(double));
-//	cudaMemcpyToSymbol(sigmaL,&sigmaL_h,sizeof(double));
+	cudaMemcpyToSymbol(sigmaL,&sigmaL_h,sizeof(double));
 
 	cudaMemcpyToSymbol(damping,&damping_h,sizeof(double));
 	cudaMemcpyToSymbol(Delta,&Delta_h,sizeof(double));
@@ -249,6 +249,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *xi
 	paths_rk2<<<blocks,TPB>>>(k_d,theta_d,phi_d,xi_d,eta_d,init_d,pos_d);
 	//paths_rk4<<<blocks,TPB>>>(k_d,theta_d,phi_d,xi_d,eta_d,init_d,pos_d);
 
+	cudaMemcpy(init_h,init_d,N*sizeof(double),cudaMemcpyDeviceToHost);
 	cudaMemcpy(pos_h,pos_d,N*sizeof(double),cudaMemcpyDeviceToHost);
 
 	cudaFree(devStates);
@@ -282,6 +283,10 @@ __global__ void kmodes(double *vec,curandState *globalState,int opt,int n){
 		}
 		globalState[idx]=localState; // Update current seed state
 	}
+}
+
+__global__ void paths_euler(double *k,double *theta,double *phi,double *xi,double *eta,double *init,double *pos){
+
 }
 
 __global__ void paths_rk2(double *k,double *theta,double *phi,double *xi,double *eta,double *init,double *pos){
