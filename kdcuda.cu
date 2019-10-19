@@ -7,7 +7,7 @@
 
 #define TPB 256
 
-#define N 1 // Number of electrons
+#define N 35000 // Number of electrons
 #define Nk 20 // Number of k-modes
 #define Ne 10 // Number of polarizations per k-mode
 
@@ -106,9 +106,9 @@ void onHost(){
 	free(k_h);
 	free(theta_h);
 	free(phi_h);
-	free(xi_h);
 	free(eta_h);
 	free(angles_h);
+	free(xi_h);
 	free(init_h);
 	free(positions_h);
 }
@@ -188,6 +188,11 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpyToSymbol(xi,&xi_h,Ne*sizeof(double));
 
+	float elapsedTime; // Variables to record execution times
+	cudaEvent_t start,stop;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+
 	double *k_d,*theta_d,*phi_d;
 	double *eta_d;
 	double *angles_d;
@@ -214,6 +219,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	/* Randomly generated k-modes inside the spherical shell */
 
+	cudaEventRecord(start,0);
+
 	curandState *devStates;
         cudaMalloc(&devStates,Nk*sizeof(curandState));
 
@@ -234,7 +241,14 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaMemcpy(theta_h,theta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 	cudaMemcpy(phi_h,phi_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 
+	cudaEventRecord(stop,0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsedTime,start,stop);
+	printf("Random k-modes succesfully generated in %6.4f ms\n",elapsedTime);
+
 	/* Randomly generated phases for the CPC modes */
+
+	cudaEventRecord(start,0);
 
 	curandState *devStates_n;
 	cudaMalloc(&devStates_n,2*Nk*sizeof(curandState));
@@ -250,6 +264,11 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	kmodes<<<blocks,TPB>>>(eta_d,devStates_n,3,2*Nk);
 
 	cudaMemcpy(eta_h,eta_d,2*Nk*sizeof(double),cudaMemcpyDeviceToHost);
+
+	cudaEventRecord(stop,0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsedTime,start,stop);
+	printf("Random ZPF phases succesfully generated in %6.4f ms\n",elapsedTime);
 
 	/* Making a single vector for theta, phi and eta (reduces the size of memory, one double pointer instead of three) */
 	
@@ -268,6 +287,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	/* Initial positions */
 
+	cudaEventRecord(start,0);
+
 	blocks=(N+TPB-1)/TPB;
 	printf("Number of blocks (paths): %d\n",blocks);
 
@@ -284,18 +305,30 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpy(positions_d,positions_h,2*N*sizeof(double),cudaMemcpyHostToDevice);
 
-	//paths_euler<<<blocks,TPB>>>(k_d,angles_d,positions_d);
-	paths_rk2<<<blocks,TPB>>>(k_d,angles_d,positions_d);
-	//paths_rk4<<<blocks,TPB>>>(k_d,angles_d,positions_d);
+	cudaEventRecord(stop,0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsedTime,start,stop);
+	printf("Positions vector initialized in %6.4f ms\n",elapsedTime);
 
-	cudaMemcpy(positions_h,positions_h,2*N*sizeof(double),cudaMemcpyDeviceToHost);
+	cudaEventRecord(start,0);
+
+	//paths_euler<<<blocks,TPB>>>(k_d,angles_d,positions_d);
+	//paths_rk2<<<blocks,TPB>>>(k_d,angles_d,positions_d);
+	paths_rk4<<<blocks,TPB>>>(k_d,angles_d,positions_d);
+
+	cudaEventRecord(stop,0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsedTime,start,stop);
+	//printf("Paths computed using Euler method in %6.4f ms\n",elapsedTime);
+	//printf("Paths computed using RK2 method in %6.4f ms\n",elapsedTime);
+	printf("Paths computed using RK4 method in %6.4f ms\n",elapsedTime);
+
+	cudaMemcpy(positions_h,positions_d,2*N*sizeof(double),cudaMemcpyDeviceToHost);
 
 	cudaFree(devStates);
 	cudaFree(devStates_n);
 	cudaFree(k_d);
-	cudaFree(theta_d);
-	cudaFree(angles_d);
-	cudaFree(init_d);
+	cudaFree(angles_d);	
 	cudaFree(positions_d);
 }
 
@@ -476,17 +509,17 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 	}
 }
 __global__ void paths_rk4(double *k,double *angles,double *pos){
-	unsigned int idx=threadIdx.x+blockIdx.x*blockDim.x;
+	unsigned int idx=threadIdx.x+blockIdx.x*TPB;
 
-	__shared__ double k1vx[blockDim.x];
-	__shared__ double k1vy[blockDim.x];
-	__shared__ double k1vz[blockDim.x];
-	__shared__ double k2vx[blockDim.x];
-	__shared__ double k2vy[blockDim.x];
-	__shared__ double k2vz[blockDim.x];
-	__shared__ double k3vx[blockDim.x];
-	__shared__ double k3vy[blockDim.x];
-	__shared__ double k3vz[blockDim.x];
+	__shared__ double k1vx[TPB];
+	__shared__ double k1vy[TPB];
+	__shared__ double k1vz[TPB];
+	__shared__ double k2vx[TPB];
+	__shared__ double k2vy[TPB];
+	__shared__ double k2vz[TPB];
+	__shared__ double k3vx[TPB];
+	__shared__ double k3vy[TPB];
+	__shared__ double k3vz[TPB];
 
 	if(idx<N){
 		double tn=0.0;
@@ -517,7 +550,7 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 		k3vx[threadIdx.x]=0.0;
 		k3vy[threadIdx.x]=0.0;
 		k3vz[threadIdx.x]=0.0;
-		while(zn<=zimp){
+		while(zn<=D){
 			for(int i=0;i<Nk;i++){
 				for(int j=0;i<Ne;i++){
 					__syncthreads();
