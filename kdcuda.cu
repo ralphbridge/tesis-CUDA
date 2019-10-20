@@ -7,7 +7,7 @@
 
 #define TPB 256
 
-#define N 35000 // Number of electrons
+#define N 50 // Number of electrons
 #define Nk 20 // Number of k-modes
 #define Ne 10 // Number of polarizations per k-mode
 
@@ -81,7 +81,7 @@ void onHost(){
 
 	eta_h=(double*)malloc(2*Nk*sizeof(double));
 
-	angles_h=(double*)malloc(3*Nk*sizeof(double));
+	angles_h=(double*)malloc(4*Nk*sizeof(double));
 
 	xi_h=(double*)malloc(Ne*sizeof(double));
 
@@ -93,13 +93,13 @@ void onHost(){
 
 	k_vec=fopen("k-vectors.txt","w");
 	for(int i=0;i<Nk;i++){
-		fprintf(k_vec,"%f,%f,%f,%f,%f\n",k_h[i],theta_h[i],phi_h[i],eta_h[i],eta_h[i+Nk]);
+		fprintf(k_vec,"%2.8e,%f,%f,%f,%f\n",k_h[i],theta_h[i],phi_h[i],eta_h[i],eta_h[i+Nk]);
 	}
 	fclose(k_vec);
 
 	posit=fopen("positions.txt","w");
 	for(int i=0;i<N;i++){
-		fprintf(posit,"%f,%f\n",positions_h[i],positions_h[N+i]);
+		fprintf(posit,"%2.6e,%2.6e\n",positions_h[i],positions_h[N+i]);
 	}
 	fclose(posit);
 
@@ -114,8 +114,6 @@ void onHost(){
 }
 
 void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *angles_h,double *xi_h,double *init_h,double *positions_h){
-	/*const int block_calc=(Nk+TPB-1)/TPB;
-	const int blocks=(Nk<block_calc ? 32:block_calc); // Maximum number of resident blocks per SM: 32 <---- ? */
 	unsigned int blocks=(Nk+TPB-1)/TPB;
 
 	double pi_h=3.1415926535;
@@ -128,10 +126,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double v0_h=1.1e7;
 	double fwhm_h=25e-6;
 	double sigma_h=fwhm_h/(2.0*sqrt(2.0*log(2.0)));
-
-	//double wC_h=m_h*pow(c_h,2.0)/hbar_h;
-	//double kC_h=wC_h/c_h;
-	//double lamC_h=2*pi_h/kC_h;
 
 	double lamL_h=532e-9;
 	double kL_h=2*pi_h/lamL_h;
@@ -159,10 +153,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaMemcpyToSymbol(eps0,&eps0_h,sizeof(double));
 	cudaMemcpyToSymbol(v0,&v0_h,sizeof(double));
 	cudaMemcpyToSymbol(sigma,&sigma_h,sizeof(double));
-
-	//cudaMemcpyToSymbol(wC,&wC_h,sizeof(double));
-	//cudaMemcpyToSymbol(kC,&kC_h,sizeof(double));
-	//cudaMemcpyToSymbol(lamC,&lamC_h,sizeof(double));
 
 	cudaMemcpyToSymbol(lamL,&lamL_h,sizeof(double));
 	cudaMemcpyToSymbol(kL,&kL_h,sizeof(double));
@@ -211,7 +201,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMalloc((void**)&eta_d,2*Nk*sizeof(double));
 
-	cudaMalloc((void**)&angles_d,3*Nk*sizeof(double));
+	cudaMalloc((void**)&angles_d,4*Nk*sizeof(double));
 
 	cudaMalloc((void**)&init_d,N*sizeof(double));
 
@@ -221,21 +211,21 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaEventRecord(start,0);
 
-	curandState *devStates;
-        cudaMalloc(&devStates,Nk*sizeof(curandState));
+	curandState *devStates_kmodes;
+        cudaMalloc(&devStates_kmodes,Nk*sizeof(curandState));
 
 	//k
 	srand(time(0));
 	int seed=rand(); //Setting up the seeds
-	setup_kmodes<<<blocks,TPB>>>(devStates,seed);
+	setup_kmodes<<<blocks,TPB>>>(devStates_kmodes,seed);
 
-	kmodes<<<blocks,TPB>>>(k_d,devStates,1,Nk);
+	kmodes<<<blocks,TPB>>>(k_d,devStates_kmodes,1,Nk);
 
 	//theta
-	kmodes<<<blocks,TPB>>>(theta_d,devStates,2,Nk);
+	kmodes<<<blocks,TPB>>>(theta_d,devStates_kmodes,2,Nk);
 
 	//phi
-	kmodes<<<blocks,TPB>>>(phi_d,devStates,3,Nk);
+	kmodes<<<blocks,TPB>>>(phi_d,devStates_kmodes,3,Nk);
 
 	cudaMemcpy(k_h,k_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 	cudaMemcpy(theta_h,theta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
@@ -250,8 +240,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaEventRecord(start,0);
 
-	curandState *devStates_n;
-	cudaMalloc(&devStates_n,2*Nk*sizeof(curandState));
+	curandState *devStates_eta;
+	cudaMalloc(&devStates_eta,2*Nk*sizeof(curandState));
 
 	blocks=(2*Nk+TPB-1)/TPB;
 	printf("Number of blocks (phases): %d\n",blocks);
@@ -259,9 +249,9 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	//eta
 	srand(time(NULL));
 	seed=rand(); //Settin up seeds
-	setup_kmodes<<<blocks,TPB>>>(devStates_n,seed);
+	setup_kmodes<<<blocks,TPB>>>(devStates_eta,seed);
 
-	kmodes<<<blocks,TPB>>>(eta_d,devStates_n,3,2*Nk);
+	kmodes<<<blocks,TPB>>>(eta_d,devStates_eta,3,2*Nk);
 
 	cudaMemcpy(eta_h,eta_d,2*Nk*sizeof(double),cudaMemcpyDeviceToHost);
 
@@ -289,10 +279,17 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaEventRecord(start,0);
 
+	curandState *devStates_init;
+	cudaMalloc(&devStates_init,N*sizeof(curandState));
+
 	blocks=(N+TPB-1)/TPB;
 	printf("Number of blocks (paths): %d\n",blocks);
 
-	kmodes<<<blocks,TPB>>>(init_d,devStates_n,4,N);
+	srand(time(NULL));
+	seed=rand();
+	setup_kmodes<<<blocks,TPB>>>(devStates_init,seed);
+
+	kmodes<<<blocks,TPB>>>(init_d,devStates_init,4,N);
 
 	cudaMemcpy(init_h,init_d,N*sizeof(double),cudaMemcpyDeviceToHost);
 
@@ -325,10 +322,12 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpy(positions_h,positions_d,2*N*sizeof(double),cudaMemcpyDeviceToHost);
 
-	cudaFree(devStates);
-	cudaFree(devStates_n);
+	cudaFree(devStates_kmodes);
+	cudaFree(devStates_eta);
+	cudaFree(devStates_init);
 	cudaFree(k_d);
-	cudaFree(angles_d);	
+	cudaFree(angles_d);
+	cudaFree(init_d);
 	cudaFree(positions_d);
 }
 
