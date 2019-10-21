@@ -7,9 +7,9 @@
 
 #define TPB 256
 
-#define N 50 // Number of electrons
-#define Nk 20 // Number of k-modes
-#define Ne 10 // Number of polarizations per k-mode
+#define N 1000 // Number of electrons
+#define Nk 3000 // Number of k-modes
+#define Ne 3 // Number of polarizations per k-mode
 
 __constant__ double pi;
 __constant__ double q; // electron charge
@@ -19,12 +19,6 @@ __constant__ double c; // velocity of light in vacuum
 __constant__ double eps0;
 __constant__ double v0; // electron velocity before laser region
 __constant__ double sigma; // electron beam standard deviation
-//__constant__ double beta=v0/c;
-//__constant__ double gamma=1.0;//pow(1.0-pow(beta,2.0),-0.5);
-
-//__constant__ double wC; // Compton frequency
-//__constant__ double kC; // kC=wC/c
-//__constant__ double lamC; // lamC=2pi/kC
 
 __constant__ double wL; // Laser frequency
 __constant__ double kL; // kL=wL/c
@@ -93,7 +87,7 @@ void onHost(){
 
 	k_vec=fopen("k-vectors.txt","w");
 	for(int i=0;i<Nk;i++){
-		fprintf(k_vec,"%2.8e,%f,%f,%f,%f\n",k_h[i],theta_h[i],phi_h[i],eta_h[i],eta_h[i+Nk]);
+		fprintf(k_vec,"%2.8e,%f,%f,%f,%f\n",k_h[i],angles_h[i],angles_h[Nk+i],angles_h[2*Nk+i],angles_h[3*Nk+i]);
 	}
 	fclose(k_vec);
 
@@ -297,7 +291,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	for(int i=0;i<N;i++){
 		positions_h[i]=init_h[i];
-		positions_h[i]=0;
+		positions_h[N+i]=0.0;
 	}
 
 	cudaMemcpy(positions_d,positions_h,2*N*sizeof(double),cudaMemcpyHostToDevice);
@@ -309,16 +303,16 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaEventRecord(start,0);
 
-	//paths_euler<<<blocks,TPB>>>(k_d,angles_d,positions_d);
+	paths_euler<<<blocks,TPB>>>(k_d,angles_d,positions_d);
 	//paths_rk2<<<blocks,TPB>>>(k_d,angles_d,positions_d);
-	paths_rk4<<<blocks,TPB>>>(k_d,angles_d,positions_d);
+	//paths_rk4<<<blocks,TPB>>>(k_d,angles_d,positions_d);
 
 	cudaEventRecord(stop,0);
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&elapsedTime,start,stop);
-	//printf("Paths computed using Euler method in %6.4f ms\n",elapsedTime);
+	printf("Paths computed using Euler method in %6.4f ms\n",elapsedTime);
 	//printf("Paths computed using RK2 method in %6.4f ms\n",elapsedTime);
-	printf("Paths computed using RK4 method in %6.4f ms\n",elapsedTime);
+	//printf("Paths computed using RK4 method in %6.4f ms\n",elapsedTime);
 
 	cudaMemcpy(positions_h,positions_d,2*N*sizeof(double),cudaMemcpyDeviceToHost);
 
@@ -375,10 +369,29 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 		vynn[threadIdx.x]=0.0;
 		vznn[threadIdx.x]=0.0;
 
+		/*printf("Before vznn=%2.6e\n",vxnn[threadIdx.x]);
+		printf("Before vynn=%2.6e\n",vznn[threadIdx.x]);
+		printf("Before vznn=%2.6e\n",vynn[threadIdx.x]);*/
+		
 		while(zn<=D){
 			for(int i=0;i<Nk;i++){
 				for(int j=0;j<Ne;j++){
 					__syncthreads();
+					/*if(i==0&&j==0&&tn<5.0*dt){
+					printf("i=%i j=%i vxnn=%2.6e\n",i,j,vxnn[threadIdx.x]);
+					printf("i=%i j=%i k=%2.6e\n",i,j,k[i]);
+					printf("i=%i j=%i theta=%2.6e\n",i,j,angles[i]);
+					printf("i=%i j=%i phi=%2.6e\n",i,j,angles[Nk+i]);
+					printf("i=%i j=%i eta1=%2.6e\n",i,j,angles[2*Nk+i]);
+					printf("i=%i j=%i eta2=%2.6e\n",i,j,angles[3*Nk+i]);
+					printf("i=%i j=%i xi=%2.6e\n",i,j,xi[j]);
+					printf("i=%i j=%i tn=%2.6e\n",i,j,tn);
+					printf("i=%i j=%i xn=%2.6e\n",i,j,xn);
+					printf("i=%i j=%i yn=%2.6e\n",i,j,yn);
+					printf("i=%i j=%i zn=%2.6e\n",i,j,zn);
+					printf("i=%i j=%i vyn=%2.6e\n",i,j,vyn);
+					printf("i=%i j=%i vzn=%2.6e\n",i,j,vzn);
+					}*/
 					f(vxnn[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // vxnn represents here the total ZPF force in x (recycled variable)
 					__syncthreads();
 					g(vynn[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
@@ -386,8 +399,19 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 					h(vznn[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
 				}
 			}
+			/*if(tn==dt){
+				printf("Before laser vznn=%2.6e\n",vxnn[threadIdx.x]);
+				printf("Before laser vynn=%2.6e\n",vznn[threadIdx.x]);
+				printf("Before laser vznn=%2.6e\n",vynn[threadIdx.x]);
+			}*/
+
 			gL(vynn[threadIdx.x],tn,yn,zn,vzn);
 			hL(vznn[threadIdx.x],tn,yn,zn,vyn);
+			/*if(tn==dt){
+				printf("After laser vznn=%2.6e\n",vxnn[threadIdx.x]);
+				printf("After laser vynn=%2.6e\n",vznn[threadIdx.x]);
+				printf("After laser vznn=%2.6e\n",vynn[threadIdx.x]);
+			}*/
 
 			__syncthreads();
 			vxnn[threadIdx.x]=vxn+dt*vxnn[threadIdx.x];
@@ -407,9 +431,18 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 			vxn=vxnn[threadIdx.x];
 			vyn=vynn[threadIdx.x];
 			vzn=vznn[threadIdx.x];
+			/*if(tn==dt){
+				printf("vznn=%2.6e\n",vxnn[threadIdx.x]);
+				printf("vynn=%2.6e\n",vznn[threadIdx.x]);
+				printf("vznn=%2.6e\n",vynn[threadIdx.x]);
+				printf("xn=%2.6e\n",xn);
+				printf("yn=%2.6e\n",yn);
+				printf("zn=%2.6e\n",zn);
+			}*/
 		}
 		__syncthreads();
 		pos[N+idx]=yn+(zimp-D)*vyn/vzn;
+		//printf("res=%2.6e\n",pos[N+idx]);
 	}
 }
 
@@ -725,9 +758,10 @@ __device__ void f(double &kv,double const &k,double const &theta,double const &p
 
 	__syncthreads();
 	double E0=sqrt(hbar*w/(eps0*V));
-	
+
 	__syncthreads();
 	kv+=q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*cos(phi)*cos(xi)-sin(phi)*sin(xi))/m;
+
 	__syncthreads();
 	kv+=q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vy+(cos(theta)*sin(phi)*sin(xi)-cos(phi)*cos(xi))*vz)/(m*c);
 }
