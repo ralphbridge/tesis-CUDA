@@ -1,9 +1,13 @@
 #include<cuda_runtime.h>
 #include<stdio.h>
+#include<time.h>
 #include<cuda_runtime.h>
 #include<curand.h>
 #include<curand_kernel.h>
 #include"math.h"
+#include<iostream>
+#include<fstream>
+#include<sstream>
 
 #define TPB 256
 
@@ -14,9 +18,9 @@ RK2:	37 4-Byte registers, 48 Bytes of shared memory per thread. 1800Ti =>  75.0%
 RK4:	43 4-Byte registers, 72 Bytes of shared memory per thread. 1080Ti =>  62.5% occupancy, 35840 particles simultaneously.
 */
 
-#define N 50000 // Number of electrons
-#define Nk 1 // Number of k-modes
-#define Ne 1 // Number of polarizations per k-mode
+#define N 30000 // Number of electrons
+#define Nk 1000 // Number of k-modes
+#define Ne 5 // Number of polarizations per k-mode
 
 __constant__ double pi;
 __constant__ double q; // electron charge
@@ -31,13 +35,17 @@ __constant__ double wL; // Laser frequency
 __constant__ double kL; // kL=wL/c
 __constant__ double lamL; // lamL=2pi/kL
 
+__constant__ double wR; // ZPF frequency (resonance)
+__constant__ double kR; // kR=wR/c
+__constant__ double lamR; // lamR=2pi/kR
+
 __constant__ double E0L; // Laser electric field intensity amplitude
 __constant__ double D; // Laser beam waist
 __constant__ double zimp; // Screen position (origin set right before laser region)
 __constant__ double sigmaL; // laser region standard deviation
 
 __constant__ double damping; // Damping rate (harmonic oscillator approximation)
-__constant__ double Delta; // thickness of the spherical shell in k-space
+__constant__ double Delta; // thickness of the spherical shell in k-space using resonance frequency
 __constant__ double kmin;
 __constant__ double kmax;
 __constant__ double V; // Estimated total volume of space
@@ -67,7 +75,22 @@ int main(){
 }
 
 void onHost(){
-	FILE *k_vec,*posit;
+	FILE *k_vec,*posit=NULL;
+
+	time_t rawtime;
+	struct tm*timeinfo;
+
+	time(&rawtime);
+	timeinfo=localtime(&rawtime);
+
+	printf("\nThe current time is %s",asctime(timeinfo));
+
+	const char* name="positions";
+	const char* format=".txt";
+
+	char filename[512];
+	sprintf(filename,"%s%s%s",name,asctime(timeinfo),format);
+	//printf("The filename is %s",filename.c_str());
 
 	double *k_h,*theta_h,*phi_h; // Spherical coordinates for each k-mode (Nk in total)
 	double *eta_h; // Random phases for the ZPF k-modes (2Nk in total)
@@ -98,7 +121,7 @@ void onHost(){
 	}
 	fclose(k_vec);
 
-	posit=fopen("positions.txt","w");
+	posit=fopen(filename,"w");
 	for(int i=0;i<N;i++){
 		fprintf(posit,"%2.6e,%2.6e\n",positions_h[i],positions_h[N+i]);
 	}
@@ -120,8 +143,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double pi_h=3.1415926535;
 	double q_h=1.6e-19;
 	double m_h=9.10938356e-31;
-//	double hbar_h=1.0545718e-34;
-	double hbar_h=0; // uncomment this line to see classical results
+	double hbar_h=1.0545718e-34;
+//	double hbar_h=0; // uncomment this line to see classical results
 	double c_h=299792458.0;
 	double eps0_h=8.85e-12;
 	double v0_h=1.1e7;
@@ -132,19 +155,27 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double kL_h=2*pi_h/lamL_h;
 	double wL_h=kL_h*c_h;
 
+//	double lamR_h=lamL_h;
+	double lamR_h=2*pi_h*hbar_h/(m_h*v0_h);
+//	double kR_h=kL_h;
+	double kR_h=2*pi_h/lamR_h;
+//	double wR_h=wL_h;
+	double wR_h=kR_h*c_h;
+
 	double E0L_h=2.6e8;
 	double D_h=125e-6;
 	double zimp_h=24e-2+D_h;
 	double sigmaL_h=26e-6;
 
 	double damping_h=6.245835e-24;
-	double Delta_h=1e7*damping_h*pow(wL_h,2.0);
-	double kmin_h=(wL_h-Delta_h/2.0)/c_h;
-	double kmax_h=(wL_h+Delta_h/2.0)/c_h;
+	double Delta_h=1e4*damping_h*pow(wR_h,2.0);
+	double kmin_h=(wR_h-Delta_h/2.0)/c_h;
+	double kmax_h=(wR_h+Delta_h/2.0)/c_h;
 	double Vk_h=4.0*pi_h*(pow(kmax_h,3.0)-pow(kmin_h,3.0))/3.0;
 	double V_h=pow(2.0*pi_h,3.0)*Nk/Vk_h;
 
-	double dt_h=pi_h/(10.0*(wL_h+Delta_h/2.0));
+//	double dt_h=pi_h/(wL_h+Delta_h/2.0);
+	double dt_h=pi_h/wL_h;
 
 	cudaMemcpyToSymbol(pi,&pi_h,sizeof(double));
 	cudaMemcpyToSymbol(q,&q_h,sizeof(double));
@@ -158,6 +189,10 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaMemcpyToSymbol(lamL,&lamL_h,sizeof(double));
 	cudaMemcpyToSymbol(kL,&kL_h,sizeof(double));
 	cudaMemcpyToSymbol(wL,&wL_h,sizeof(double));
+
+	cudaMemcpyToSymbol(lamR,&lamR_h,sizeof(double));
+	cudaMemcpyToSymbol(kR,&kR_h,sizeof(double));
+	cudaMemcpyToSymbol(wR,&wR_h,sizeof(double));
 
 	cudaMemcpyToSymbol(E0L,&E0L_h,sizeof(double));
 	cudaMemcpyToSymbol(D,&D_h,sizeof(double));
@@ -191,6 +226,12 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double *positions_d;
 
 	printf("Number of particles (N): %d\n",N);
+	if(hbar_h>0.0){
+		printf("Quantum version of the KD effect\n");
+		printf("wR=%2.6e rad/s\n",wR_h);
+	}else printf("Classical version of the KD effect\n");
+	printf("E0L=%2.6e V/m\n",E0L_h);
+	printf("dt=%2.6e s\n",dt_h);
 	printf("Number of k-modes (Nk): %d\n",Nk);
 	printf("Number of polarizations (Ne): %d\n",Ne);
 	printf("Threads per block: %d\n",TPB);
@@ -319,7 +360,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaEventElapsedTime(&elapsedTime,start,stop);
 	//printf("Paths computed using Euler method in %6.4f ms\n",elapsedTime);
 	//printf("Paths computed using RK2 method in %6.4f ms\n",elapsedTime);
-	printf("Paths computed using RK4 method in %6.4f ms\n",elapsedTime);
+	printf("Paths computed using RK4 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
+	printf("------------------------------------------------------------");
 
 	cudaMemcpy(positions_h,positions_d,2*N*sizeof(double),cudaMemcpyDeviceToHost);
 
@@ -435,18 +477,14 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 		__syncthreads();
 		double vzn=v0;
 
-		double vxnn=0.0;
-		double vynn=0.0;
-		double vznn=0.0;
-
-		k1vx[threadIdx.x]=0.0;
-		k1vy[threadIdx.x]=0.0;
-		k1vz[threadIdx.x]=0.0;
-		k2vx[threadIdx.x]=0.0;
-		k2vy[threadIdx.x]=0.0;
-		k2vz[threadIdx.x]=0.0;
-
 		while(zn<=D){ // Only laser region. After the particle leaves it, the final position is extrapolated
+			k1vx[threadIdx.x]=0.0;
+			k1vy[threadIdx.x]=0.0;
+			k1vz[threadIdx.x]=0.0;
+			k2vx[threadIdx.x]=0.0;
+			k2vy[threadIdx.x]=0.0;
+			k2vz[threadIdx.x]=0.0;
+
 			for(int i=0;i<Nk;i++){
 				for(int j=0;j<Ne;j++){
 					__syncthreads();
@@ -470,39 +508,42 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 			__syncthreads();
 			zn=zn+dt*vzn;
 
+			__syncthreads();
+			vxn=vxn+dt*k1vx[threadIdx.x];
+			__syncthreads();
+			vyn=vyn+dt*k1vy[threadIdx.x];
+			__syncthreads();
+			vzn=vzn+dt*k1vz[threadIdx.x];
+
 			for(int i=0;i<Nk;i++){
 				for(int j=0;j<Ne;j++){
 					__syncthreads();
-					f(k2vx[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[j],tn,xn,yn,zn,vyn+dt*k1vy[threadIdx.x],vzn+dt*k1vz[threadIdx.x]); // k2vx represents here the total ZPF force in x
+					f(k2vx[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k2vx represents here the total ZPF force in x
 					__syncthreads();
-					g(k2vy[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[j],tn,xn,yn,zn,vxn+dt*k1vx[threadIdx.x],vzn+dt*k1vz[threadIdx.x]); // k2vy represents here the total ZPF force in y
+					g(k2vy[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k2vy represents here the total ZPF force in y
 					__syncthreads();
-					h(k2vz[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[j],tn,xn,yn,zn,vxn+dt*k1vx[threadIdx.x],vyn+dt*k1vy[threadIdx.x]); // k2vz represents here the total ZPF force in z
+					h(k2vz[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k2vz represents here the total ZPF force in z
 				}
 			}
 
 			__syncthreads();
-			gL(k2vy[threadIdx.x],tn,yn,zn,vzn+dt*k1vz[threadIdx.x]); // Laser contribution to the total force in y
+			gL(k2vy[threadIdx.x],tn,yn,zn,vzn); // Laser contribution to the total force in y
 			__syncthreads();
-			hL(k2vz[threadIdx.x],tn,yn,zn,vyn+dt*k1vy[threadIdx.x]); // Laser contribution to the total force in z
+			hL(k2vz[threadIdx.x],tn,yn,zn,vyn); // Laser contribution to the total force in z
 
 			__syncthreads();
-			vxnn=vxn+dt*(k1vx[threadIdx.x]+k2vx[threadIdx.x])/2;
+			xn=xn+pow(dt,2.0)*k1vx[threadIdx.x]/2.0;
 			__syncthreads();
-			vynn=vyn+dt*(k1vy[threadIdx.x]+k2vy[threadIdx.x])/2;
+			yn=yn+pow(dt,2.0)*k1vy[threadIdx.x]/2.0;
 			__syncthreads();
-			vznn=vzn+dt*(k1vz[threadIdx.x]+k2vz[threadIdx.x])/2;
+			zn=zn+pow(dt,2.0)*k1vz[threadIdx.x]/2.0;
 
 			__syncthreads();
-			xn=xn+dt*(vxnn-vxn)/2;
+			vxn=vxn+dt*(k2vx[threadIdx.x]-k1vx[threadIdx.x])/2.0;
 			__syncthreads();
-			yn=yn+dt*(vynn-vyn)/2;
+			vyn=vyn+dt*(k2vy[threadIdx.x]-k1vy[threadIdx.x])/2.0;
 			__syncthreads();
-			zn=zn+dt*(vznn-vzn)/2;
-
-			vxn=vxnn;
-			vyn=vynn;
-			vzn=vznn;
+			vzn=vzn+dt*(k2vz[threadIdx.x]-k1vz[threadIdx.x])/2.0;
 		}
 		__syncthreads();
 		pos[N+idx]=yn+(zimp-D)*vyn/vzn;
@@ -537,20 +578,25 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 		double vynn=0.0;
 		double vznn=0.0;
 
-		double k2x=0.0;
-		double k2y=0.0;
-		double k2z=0.0;
+		double k2x;
+		double k2y;
+		double k2z;
 
-		k1vx[threadIdx.x]=0.0;
-		k1vy[threadIdx.x]=0.0;
-		k1vz[threadIdx.x]=0.0;
-		k2vx[threadIdx.x]=0.0;
-		k2vy[threadIdx.x]=0.0;
-		k2vz[threadIdx.x]=0.0;
-		k3vx[threadIdx.x]=0.0;
-		k3vy[threadIdx.x]=0.0;
-		k3vz[threadIdx.x]=0.0;
 		while(zn<=D){
+			k2x=0.0;
+			k2y=0.0;
+			k2z=0.0;
+
+			k1vx[threadIdx.x]=0.0;
+			k1vy[threadIdx.x]=0.0;
+			k1vz[threadIdx.x]=0.0;
+			k2vx[threadIdx.x]=0.0;
+			k2vy[threadIdx.x]=0.0;
+			k2vz[threadIdx.x]=0.0;
+			k3vx[threadIdx.x]=0.0;
+			k3vy[threadIdx.x]=0.0;
+			k3vz[threadIdx.x]=0.0;
+
 			for(int i=0;i<Nk;i++){
 				for(int j=0;i<Ne;i++){
 					__syncthreads();
