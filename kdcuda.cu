@@ -155,11 +155,9 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double kL_h=2*pi_h/lamL_h;
 	double wL_h=kL_h*c_h;
 
-//	double lamR_h=lamL_h;
-	double lamR_h=2*pi_h*hbar_h/(m_h*v0_h);
-//	double kR_h=kL_h;
+	double lamR_h=lamL_h;
+//	double lamR_h=2*pi_h*hbar_h/(m_h*v0_h);
 	double kR_h=2*pi_h/lamR_h;
-//	double wR_h=wL_h;
 	double wR_h=kR_h*c_h;
 
 	double E0L_h=2.6e8;
@@ -168,14 +166,14 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double sigmaL_h=26e-6;
 
 	double damping_h=6.245835e-24;
-	double Delta_h=1e4*damping_h*pow(wR_h,2.0);
+	double Delta_h=9e7*damping_h*pow(wR_h,2.0);
 	double kmin_h=(wR_h-Delta_h/2.0)/c_h;
 	double kmax_h=(wR_h+Delta_h/2.0)/c_h;
 	double Vk_h=4.0*pi_h*(pow(kmax_h,3.0)-pow(kmin_h,3.0))/3.0;
 	double V_h=pow(2.0*pi_h,3.0)*Nk/Vk_h;
 
 //	double dt_h=pi_h/(wL_h+Delta_h/2.0);
-	double dt_h=pi_h/wL_h;
+	double dt_h=1.0/wL_h;
 
 	cudaMemcpyToSymbol(pi,&pi_h,sizeof(double));
 	cudaMemcpyToSymbol(q,&q_h,sizeof(double));
@@ -229,6 +227,11 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	if(hbar_h>0.0){
 		printf("Quantum version of the KD effect\n");
 		printf("wR=%2.6e rad/s\n",wR_h);
+		printf("Delta=%2.6e\n",Delta_h);
+		printf("kmin=%2.6e\n",kmin_h);
+		printf("kmax=%2.6e\n",kmax_h);
+		printf("Vk=%2.6e\n",Vk_h);
+		printf("V=%2.6e\n",V_h);
 	}else printf("Classical version of the KD effect\n");
 	printf("E0L=%2.6e V/m\n",E0L_h);
 	printf("dt=%2.6e s\n",dt_h);
@@ -763,7 +766,7 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 	
 __device__ void f(double &kv,double const &k,double const &theta,double const &phi,double const &eta1,double const &eta2,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component
 	__syncthreads();
-	double w=k/c;
+	double w=k*c;
 
 	__syncthreads();
 	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta1;
@@ -782,7 +785,7 @@ __device__ void f(double &kv,double const &k,double const &theta,double const &p
 
 __device__ void g(double &kv,double const &k,double const &theta,double const &phi,double const &eta1,double const &eta2,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component
 	__syncthreads();
-	double w=k/c;
+	double w=k*c;
 
 	__syncthreads();
 	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta1;
@@ -813,7 +816,7 @@ __device__ void gL(double &kv,double const &t,double const &y,double const &z,do
 
 __device__ void h(double &kv,double const &k,double const &theta,double const &phi,double const &eta1,double const &eta2,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component
 	__syncthreads();
-	double w=k/c;
+	double w=k*c;
 
 	__syncthreads();
 	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta1;
