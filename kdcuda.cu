@@ -160,7 +160,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double kR_h=2*pi_h/lamR_h;
 	double wR_h=kR_h*c_h;
 
-	double E0L_h=2.6e8;
+	double E0L_h=2.3e8;
 	double D_h=125e-6;
 	double zimp_h=24e-2+D_h;
 	double sigmaL_h=26e-6;
@@ -172,8 +172,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double Vk_h=4.0*pi_h*(pow(kmax_h,3.0)-pow(kmin_h,3.0))/3.0;
 	double V_h=pow(2.0*pi_h,3.0)*Nk/Vk_h;
 
-//	double dt_h=pi_h/(wL_h+Delta_h/2.0);
-	double dt_h=1.0/wL_h;
+	double dt_h=pi_h/(1.5*wL_h);
+//	double dt_h=1.0/wL_h;
 
 	cudaMemcpyToSymbol(pi,&pi_h,sizeof(double));
 	cudaMemcpyToSymbol(q,&q_h,sizeof(double));
