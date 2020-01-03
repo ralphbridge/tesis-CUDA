@@ -18,9 +18,9 @@ RK2:	37 4-Byte registers, 48 Bytes of shared memory per thread. 1800Ti =>  75.0%
 RK4:	43 4-Byte registers, 72 Bytes of shared memory per thread. 1080Ti =>  62.5% occupancy, 35840 particles simultaneously.
 */
 
-#define N 30000 // Number of electrons
-#define Nk 1000 // Number of k-modes
-#define Ne 5 // Number of polarizations per k-mode
+#define N 1 // Number of electrons
+#define Nk 20000 // Number of k-modes
+#define Ne 1 // Number of polarizations per k-mode
 
 __constant__ double pi;
 __constant__ double q; // electron charge
@@ -30,6 +30,7 @@ __constant__ double c; // velocity of light in vacuum
 __constant__ double eps0;
 __constant__ double v0; // electron velocity before laser region
 __constant__ double sigma; // electron beam standard deviation
+__constant__ double sigma_p; // electron beam transverse momentum standard deviation
 
 __constant__ double wL; // Laser frequency
 __constant__ double kL; // kL=wL/c
@@ -55,7 +56,7 @@ __constant__ double dt; // time step necessary to resolve the electron trajector
 __constant__ double xi[Ne]; // Polarization angles for each k-mode (Ne in total): NOT random, allocated in CONSTANT memory for optimization purposes
 
 void onHost();
-void onDevice(double *k,double *theta,double *phi,double *eta,double *angles,double *xi,double *init,double *positions);
+void onDevice(double *k,double *theta,double *phi,double *eta,double *angles,double *xi,double *init,double *v_init,double *positions);
 
 __global__ void setup_kmodes(curandState *state,unsigned long seed);
 __global__ void kmodes(double *x,curandState *state,int option,int n);
@@ -97,7 +98,8 @@ void onHost(){
 	double *angles_h; // Single vector for the theta, phi and eta random numbers (4Nk in length for optimization purposes)
 	double *xi_h; // Polarization angles in host space
 	double *init_h; // Initial positions (h indicates host allocation)
-	double *positions_h; // Single vector for the initial and final positions (2N in length for optimization purposes)
+	double *v_init_h; // Initial transverse velocities
+	double *positions_h; // Single vector for the initial position, initial transverse velocities and final positions (3N in length for optimization purposes)
 
 	k_h=(double*)malloc(Nk*sizeof(double));
 	theta_h=(double*)malloc(Nk*sizeof(double));
@@ -111,9 +113,11 @@ void onHost(){
 
 	init_h=(double*)malloc(N*sizeof(double));
 
-	positions_h=(double*)malloc(2*N*sizeof(double));
+	v_init_h=(double*)malloc(N*sizeof(double));
 
-	onDevice(k_h,theta_h,phi_h,eta_h,angles_h,xi_h,init_h,positions_h);
+	positions_h=(double*)malloc(3*N*sizeof(double));
+
+	onDevice(k_h,theta_h,phi_h,eta_h,angles_h,xi_h,init_h,v_init_h,positions_h);
 
 	k_vec=fopen("k-vectors.txt","w");
 	for(int i=0;i<Nk;i++){
@@ -123,7 +127,7 @@ void onHost(){
 
 	posit=fopen(filename,"w");
 	for(int i=0;i<N;i++){
-		fprintf(posit,"%2.6e,%2.6e\n",positions_h[i],positions_h[N+i]);
+		fprintf(posit,"%2.6e,%2.6e,%2.6e\n",positions_h[i],positions_h[N+i],positions_h[2*N+i]);
 	}
 	fclose(posit);
 
@@ -134,10 +138,11 @@ void onHost(){
 	free(angles_h);
 	free(xi_h);
 	free(init_h);
+	free(v_init_h);
 	free(positions_h);
 }
 
-void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *angles_h,double *xi_h,double *init_h,double *positions_h){
+void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *angles_h,double *xi_h,double *init_h,double *v_init_h,double *positions_h){
 	unsigned int blocks=(Nk+TPB-1)/TPB;
 
 	double pi_h=3.1415926535;
@@ -155,6 +160,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double kL_h=2*pi_h/lamL_h;
 	double wL_h=kL_h*c_h;
 
+	double sigma_p_h=4.0*pi_h*hbar_h/(lamL_h*sqrt(2.0*log(2.0)));
+
 	double lamR_h=lamL_h;
 //	double lamR_h=2*pi_h*hbar_h/(m_h*v0_h);
 	double kR_h=2*pi_h/lamR_h;
@@ -166,14 +173,14 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double sigmaL_h=26e-6;
 
 	double damping_h=6.245835e-24;
-	double Delta_h=9e7*damping_h*pow(wR_h,2.0);
+	double Delta_h=9e6*damping_h*pow(wR_h,2.0);
 	double kmin_h=(wR_h-Delta_h/2.0)/c_h;
 	double kmax_h=(wR_h+Delta_h/2.0)/c_h;
 	double Vk_h=4.0*pi_h*(pow(kmax_h,3.0)-pow(kmin_h,3.0))/3.0;
 	double V_h=pow(2.0*pi_h,3.0)*Nk/Vk_h;
 
-	double dt_h=pi_h/(1.5*wL_h);
-//	double dt_h=1.0/wL_h;
+//	double dt_h=pi_h/(1.5*wL_h);
+	double dt_h=1.0/0.1*wL_h;
 
 	cudaMemcpyToSymbol(pi,&pi_h,sizeof(double));
 	cudaMemcpyToSymbol(q,&q_h,sizeof(double));
@@ -187,6 +194,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaMemcpyToSymbol(lamL,&lamL_h,sizeof(double));
 	cudaMemcpyToSymbol(kL,&kL_h,sizeof(double));
 	cudaMemcpyToSymbol(wL,&wL_h,sizeof(double));
+
+	cudaMemcpyToSymbol(sigma_p,&sigma_p_h,sizeof(double));
 
 	cudaMemcpyToSymbol(lamR,&lamR_h,sizeof(double));
 	cudaMemcpyToSymbol(kR,&kR_h,sizeof(double));
@@ -221,6 +230,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double *eta_d;
 	double *angles_d;
 	double *init_d; // Vectors in Device (d indicates device allocation)
+	double *v_init_d;
 	double *positions_d;
 
 	printf("Number of particles (N): %d\n",N);
@@ -250,7 +260,9 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMalloc((void**)&init_d,N*sizeof(double));
 
-	cudaMalloc((void**)&positions_d,2*N*sizeof(double));
+	cudaMalloc((void**)&v_init_d,N*sizeof(double));
+
+	cudaMalloc((void**)&positions_d,3*N*sizeof(double));
 
 	/* Randomly generated k-modes inside the spherical shell */
 
@@ -320,7 +332,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpy(angles_d,angles_h,4*Nk*sizeof(double),cudaMemcpyHostToDevice);
 
-	/* Initial positions */
+	/* Initial positions and transverse momentum*/
 
 	cudaEventRecord(start,0);
 
@@ -335,17 +347,20 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	setup_kmodes<<<blocks,TPB>>>(devStates_init,seed);
 
 	kmodes<<<blocks,TPB>>>(init_d,devStates_init,4,N);
-
 	cudaMemcpy(init_h,init_d,N*sizeof(double),cudaMemcpyDeviceToHost);
+
+	kmodes<<<blocks,TPB>>>(v_init_d,devStates_init,5,N);
+	cudaMemcpy(v_init_h,v_init_d,N*sizeof(double),cudaMemcpyDeviceToHost);
 
 	/* Making a single vector for the initial and final positions (reduces the size of memory, one double pointer instead of two) */
 
 	for(int i=0;i<N;i++){
 		positions_h[i]=init_h[i];
-		positions_h[N+i]=0.0;
+		positions_h[N+i]=v_init_h[i];
+		positions_h[2*N+i]=0.0;
 	}
 
-	cudaMemcpy(positions_d,positions_h,2*N*sizeof(double),cudaMemcpyHostToDevice);
+	cudaMemcpy(positions_d,positions_h,3*N*sizeof(double),cudaMemcpyHostToDevice);
 
 	cudaEventRecord(stop,0);
 	cudaEventSynchronize(stop);
@@ -366,7 +381,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	printf("Paths computed using RK4 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	printf("------------------------------------------------------------");
 
-	cudaMemcpy(positions_h,positions_d,2*N*sizeof(double),cudaMemcpyDeviceToHost);
+	cudaMemcpy(positions_h,positions_d,3*N*sizeof(double),cudaMemcpyDeviceToHost);
 
 	cudaFree(devStates_kmodes);
 	cudaFree(devStates_eta);
@@ -374,6 +389,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaFree(k_d);
 	cudaFree(angles_d);
 	cudaFree(init_d);
+	cudaFree(v_init_d);
 	cudaFree(positions_d);
 }
 
@@ -394,6 +410,8 @@ __global__ void kmodes(double *vec,curandState *globalState,int opt,int n){
 			vec[idx]=2.0*pi*curand_uniform(&localState); // Random azimuthal angles
 		}else if(opt==4){
 			vec[idx]=sigma*curand_normal(&localState); // Random initial positions
+		}else if(opt==5){
+			vec[idx]=sigma_p*curand_normal(&localState); // Random initial positions
 		}
 		globalState[idx]=localState; // Update current seed state
 	}
@@ -413,7 +431,7 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 		double zn=0.0;
 
 		double vxn=0.0;
-		double vyn=0.0;
+		double vyn=pos[N+idx];
 		__syncthreads();
 		double vzn=v0;
 
@@ -455,7 +473,7 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 			vzn=vznn[threadIdx.x];
 		}
 		__syncthreads();
-		pos[N+idx]=yn+(zimp-D)*vyn/vzn;
+		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
 	}
 }
 
@@ -476,7 +494,7 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 		double zn=0.0;
 
 		double vxn=0.0;
-		double vyn=0.0;
+		double vyn=pos[N+idx];
 		__syncthreads();
 		double vzn=v0;
 
@@ -549,7 +567,7 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 			vzn=vzn+dt*(k2vz[threadIdx.x]-k1vz[threadIdx.x])/2.0;
 		}
 		__syncthreads();
-		pos[N+idx]=yn+(zimp-D)*vyn/vzn;
+		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
 	}
 }
 __global__ void paths_rk4(double *k,double *angles,double *pos){
@@ -573,7 +591,7 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 		double zn=0.0;
 
 		double vxn=0.0;
-		double vyn=0.0;
+		double vyn=pos[N+idx];;
 		__syncthreads();
 		double vzn=v0;
 
@@ -760,7 +778,7 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 			vzn=vznn;
 		}
 		__syncthreads();
-		pos[N+idx]=yn+(zimp-D)*vyn/vzn;
+		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
 	}
 }
 	
