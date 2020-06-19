@@ -16,11 +16,15 @@ When using different methods (Euler, RK2 or RK4) there are different memory sett
 Euler:	31 4-Byte registers, 24 Bytes of shared memory per thread. 1080Ti => 100.0% occupancy, 57344 particles simultaneously.
 RK2:	37 4-Byte registers, 48 Bytes of shared memory per thread. 1800Ti =>  75.0% occupancy, 43008 particles simultaneously.
 RK4:	43 4-Byte registers, 72 Bytes of shared memory per thread. 1080Ti =>  62.5% occupancy, 35840 particles simultaneously.
+
+********************************************************************************
+*************    THIS VERSION IS NOT OPTIMIZED    ******************************
+********************************************************************************
 */
 
 #define N 10000 // Number of electrons
-#define Nk 1 // Number of k-modes
-#define Ne 1 // Number of polarizations per k-mode
+#define Nk 4 // Number of k-modes
+#define Ne 10 // Number of polarizations per k-mode
 
 __constant__ double pi;
 __constant__ double q; // electron charge
@@ -64,11 +68,11 @@ __global__ void paths_euler(double *k,double *angles,double *pos);
 __global__ void paths_rk2(double *k,double *angles,double *pos);
 __global__ void paths_rk4(double *k,double *angles,double *pos);
 
-__device__ void f(double &kv,double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz);
-__device__ void g(double &kv,double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz);
-__device__ void gL(double &kv,double const &t,double const &y,double const &z,double const &vz);
-__device__ void h(double &kv,double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy);
-__device__ void hL(double &kv,double const &t,double const &y,double const &z,double const &vy);
+__device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz);
+__device__ double g(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz);
+__device__ double gL(double const &t,double const &y,double const &z,double const &vz);
+__device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy);
+__device__ double hL(double const &t,double const &y,double const &z,double const &vy);
 
 int main(){
 	onHost();
@@ -148,8 +152,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double pi_h=3.1415926535;
 	double q_h=1.6e-19;
 	double m_h=9.10938356e-31;
-//	double hbar_h=1.0545718e-34;
-	double hbar_h=0; // uncomment this line to see classical results
+	double hbar_h=1.0545718e-34;
+//	double hbar_h=0; // uncomment this line to see classical results
 	double c_h=299792458.0;
 	double eps0_h=8.85e-12;
 	double v0_h=1.1e7;
@@ -160,7 +164,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double kL_h=2*pi_h/lamL_h;
 	double wL_h=kL_h*c_h;
 
-	double sigma_p_h=8.0*pi_h*(1.0545718e-34)/(lamL_h*sqrt(2.0*log(2.0)));
+	double sigma_p_h=4.0*pi_h*(1.0545718e-34)/(lamL_h*sqrt(2.0*log(2.0)));
 
 	double lamR_h=lamL_h;
 //	double lamR_h=2*pi_h*hbar_h/(m_h*v0_h);
@@ -179,8 +183,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double Vk_h=4.0*pi_h*(pow(kmax_h,3.0)-pow(kmin_h,3.0))/3.0;
 	double V_h=pow(2.0*pi_h,3.0)*Nk/Vk_h;
 
-	double dt_h=pi_h/(1.5*wL_h);
-//	double dt_h=1.0/(0.1*wL_h);
+	double dt_h=pi_h/(1.5*wR_h);
+//	double dt_h=1.0/(0.1*wR_h);
 
 	cudaMemcpyToSymbol(pi,&pi_h,sizeof(double));
 	cudaMemcpyToSymbol(q,&q_h,sizeof(double));
@@ -376,8 +380,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaEventRecord(stop,0);
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&elapsedTime,start,stop);
-	//printf("Paths computed using Euler method in %6.4f ms\n",elapsedTime);
-	//printf("Paths computed using RK2 method in %6.4f ms\n",elapsedTime);
+	//printf("Paths computed using Euler method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
+	//printf("Paths computed using RK2 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	printf("Paths computed using RK4 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	printf("------------------------------------------------------------");
 
@@ -412,18 +416,21 @@ __global__ void kmodes(double *vec,curandState *globalState,int opt,int n){
 			}else{
 				vec[idx]=pow((pow(kmax,3.0)-pow(kmin,3.0))*curand_uniform(&localState)+pow(kmin,3.0),1.0/3.0);
 			}
+			//vec[idx]=pow((pow(kmax,3.0)-pow(kmin,3.0))*curand_uniform(&localState)+pow(kmin,3.0),1.0/3.0);
 		}else if(opt==2){ // Random polar angles
 			if(idx==0||idx==1||idx==2){
 				vec[idx]=pi/2.0;
 			}else{
 				vec[idx]=acos(1.0-2.0*curand_uniform(&localState));
 			}
+			//vec[idx]=acos(1.0-2.0*curand_uniform(&localState));
 		}else if(opt==3){ // Random azimuthal angles
 			if(idx==0||idx==1||idx==2){
 				vec[idx]=pi/2.0;
 			}else{
 				vec[idx]=2.0*pi*curand_uniform(&localState);
 			}
+			//vec[idx]=2.0*pi*curand_uniform(&localState);
 		}else if(opt==4){
 			vec[idx]=sigma*curand_normal(&localState); // Random initial positions
 		}else if(opt==5){
@@ -434,6 +441,7 @@ __global__ void kmodes(double *vec,curandState *globalState,int opt,int n){
 			}else{
 				vec[idx]=2.0*pi*curand_uniform(&localState); // Random constant phases
 			}
+			//vec[idx]=2.0*pi*curand_uniform(&localState);
 		}
 		globalState[idx]=localState; // Update current seed state
 	}
@@ -465,15 +473,15 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 			for(int i=0;i<Nk;i++){
 				for(int j=0;j<Ne;j++){
 					__syncthreads();
-					f(vxnn[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // vxnn represents here the total ZPF force in x (recycled variable)
+					vxnn[threadIdx.x]=vxnn[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // vxnn represents here the total ZPF force in x (recycled variable)
 					__syncthreads();
-					g(vynn[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
+					vynn[threadIdx.x]=vynn[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
 					__syncthreads();
-					h(vznn[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
+					vznn[threadIdx.x]=vznn[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
 				}
 			}
-			gL(vynn[threadIdx.x],tn,yn,zn,vzn);
-			hL(vznn[threadIdx.x],tn,yn,zn,vyn);
+			vynn[threadIdx.x]=vynn[threadIdx.x]+gL(tn,yn,zn,vzn);
+			vznn[threadIdx.x]=vznn[threadIdx.x]+hL(tn,yn,zn,vyn);
 
 			__syncthreads();
 			vxnn[threadIdx.x]=vxn+dt*vxnn[threadIdx.x];
@@ -498,7 +506,6 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
 	}
 }
-
 __global__ void paths_rk2(double *k,double *angles,double *pos){
 	unsigned int idx=threadIdx.x+blockIdx.x*TPB;
 
@@ -535,79 +542,32 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 			for(int i=0;i<Nk;i++){
 				for(int j=0;j<Ne;j++){
 					__syncthreads();
-					f(k1vx[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k1vx represents here the total ZPF force in x
+					k1vx[threadIdx.x]=k1vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k1vx represents here the total ZPF force in x
 					__syncthreads();
-					g(k1vy[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
+					k1vy[threadIdx.x]=k1vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
 					__syncthreads();
-					h(k1vz[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
+					k1vz[threadIdx.x]=k1vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
 				}
 			}
 
-			gL(k1vy[threadIdx.x],tn,yn,zn,vzn); // Laser contribution to the total force in y
-			hL(k1vz[threadIdx.x],tn,yn,zn,vyn); // Laser contribution to the total force in z
-
-/*
-			__syncthreads();
-			tn=tn+dt;
-			__syncthreads();
-			xn=xn+dt*vxn;
-			__syncthreads();
-			yn=yn+dt*vyn;
-			__syncthreads();
-			zn=zn+dt*vzn;
-
-			__syncthreads();
-			vxn=vxn+dt*k1vx[threadIdx.x];
-			__syncthreads();
-			vyn=vyn+dt*k1vy[threadIdx.x];
-			__syncthreads();
-			vzn=vzn+dt*k1vz[threadIdx.x];
+			k1vy[threadIdx.x]=k1vy[threadIdx.x]+gL(tn,yn,zn,vzn); // Laser contribution to the total force in y
+			k1vz[threadIdx.x]=k1vz[threadIdx.x]+hL(tn,yn,zn,vyn); // Laser contribution to the total force in z
 
 			for(int i=0;i<Nk;i++){
 				for(int j=0;j<Ne;j++){
 					__syncthreads();
-					f(k2vx[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k2vx represents here the total ZPF force in x
+					k2vx[threadIdx.x]=k2vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vyn+dt*k1vy[threadIdx.x],vzn+dt*k1vz[threadIdx.x]); // k2vx represents here the total ZPF force in x
 					__syncthreads();
-					g(k2vy[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k2vy represents here the total ZPF force in y
+					k2vy[threadIdx.x]=k2vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vxn+dt*k1vx[threadIdx.x],vzn+dt*k1vz[threadIdx.x]); // k2vy represents here the total ZPF force in y
 					__syncthreads();
-					h(k2vz[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k2vz represents here the total ZPF force in z
+					k2vz[threadIdx.x]=k2vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vxn+dt*k1vx[threadIdx.x],vyn+dt*k1vy[threadIdx.x]); // k2vz represents here the total ZPF force in z
 				}
 			}
 
 			__syncthreads();
-			gL(k2vy[threadIdx.x],tn,yn,zn,vzn); // Laser contribution to the total force in y
+			k2vy[threadIdx.x]=k2vy[threadIdx.x]+gL(tn+dt,yn+dt*vyn,zn+dt*vzn,vzn+dt*k1vz[threadIdx.x]); // Laser contribution to the total force in y
 			__syncthreads();
-			hL(k2vz[threadIdx.x],tn,yn,zn,vyn); // Laser contribution to the total force in z
-
-			__syncthreads();
-			xn=xn+pow(dt,2.0)*k1vx[threadIdx.x]/2.0;
-			__syncthreads();
-			yn=yn+pow(dt,2.0)*k1vy[threadIdx.x]/2.0;
-			__syncthreads();
-			zn=zn+pow(dt,2.0)*k1vz[threadIdx.x]/2.0;
-
-			__syncthreads();
-			vxn=vxn+dt*(k2vx[threadIdx.x]-k1vx[threadIdx.x])/2.0;
-			__syncthreads();
-			vyn=vyn+dt*(k2vy[threadIdx.x]-k1vy[threadIdx.x])/2.0;
-			__syncthreads();
-			vzn=vzn+dt*(k2vz[threadIdx.x]-k1vz[threadIdx.x])/2.0;
-*/
-			for(int i=0;i<Nk;i++){
-				for(int j=0;j<Ne;j++){
-					__syncthreads();
-					f(k2vx[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vyn+dt*k1vy[threadIdx.x],vzn+dt*k1vz[threadIdx.x]); // k2vx represents here the total ZPF force in x
-					__syncthreads();
-					g(k2vy[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vxn+dt*k1vx[threadIdx.x],vzn+dt*k1vz[threadIdx.x]); // k2vy represents here the total ZPF force in y
-					__syncthreads();
-					h(k2vz[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vxn+dt*k1vx[threadIdx.x],vyn+dt*k1vy[threadIdx.x]); // k2vz represents here the total ZPF force in z
-				}
-			}
-
-			__syncthreads();
-			gL(k2vy[threadIdx.x],tn+dt,yn+dt*vyn,zn+dt*vzn,vzn+dt*k1vz[threadIdx.x]); // Laser contribution to the total force in y
-			__syncthreads();
-			hL(k2vz[threadIdx.x],tn+dt,yn+dt*vyn,zn+dt*vzn,vyn+dt*k1vy[threadIdx.x]); // Laser contribution to the total force in z
+			k2vz[threadIdx.x]=k2vz[threadIdx.x]+hL(tn+dt,yn+dt*vyn,zn+dt*vzn,vyn+dt*k1vy[threadIdx.x]); // Laser contribution to the total force in z
 
 			__syncthreads();
 			vxnn=vxn+dt*(k1vx[threadIdx.x]+k2vx[threadIdx.x])/2.0;
@@ -633,9 +593,11 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 	__shared__ double k1vx[TPB];
 	__shared__ double k1vy[TPB];
 	__shared__ double k1vz[TPB];
+	
 	__shared__ double k2vx[TPB];
 	__shared__ double k2vy[TPB];
 	__shared__ double k2vz[TPB];
+	
 	__shared__ double k3vx[TPB];
 	__shared__ double k3vy[TPB];
 	__shared__ double k3vz[TPB];
@@ -652,217 +614,117 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 		__syncthreads();
 		double vzn=v0;
 
-		double vxnn;
-		double vynn;
-		double vznn;
+		double k1x;
+		double k1y;
+		double k1z;
+
+		double k2x;
+		double k2y;
+		double k2z;
 
 		double k3x;
 		double k3y;
 		double k3z;
 
+		double k4x;
+		double k4y;
+		double k4z;
+
+		double k4vx;
+		double k4vy;
+		double k4vz;
+
 		while(zn<=D){
+			k1x=0.0;
+			k1y=0.0;
+			k1z=0.0;
+
+			k2x=0.0;
+			k2y=0.0;
+			k2z=0.0;
+			
 			k3x=0.0;
 			k3y=0.0;
 			k3z=0.0;
 
+			k4x=0.0;
+			k4y=0.0;
+			k4z=0.0;
+
 			k1vx[threadIdx.x]=0.0;
 			k1vy[threadIdx.x]=0.0;
 			k1vz[threadIdx.x]=0.0;
+
 			k2vx[threadIdx.x]=0.0;
 			k2vy[threadIdx.x]=0.0;
 			k2vz[threadIdx.x]=0.0;
+
 			k3vx[threadIdx.x]=0.0;
 			k3vy[threadIdx.x]=0.0;
 			k3vz[threadIdx.x]=0.0;
 
-			vxnn=0.0;
-			vynn=0.0;
-			vznn=0.0;
+			k4vx=0.0;
+			k4vy=0.0;
+			k4vz=0.0;
 
 			for(int i=0;i<Nk;i++){ // k1
 				for(int j=0;i<Ne;i++){
 					__syncthreads();
-					f(k1vx[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k1vx represents here the total ZPF force in x
+					k1vx[threadIdx.x]=k1vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k1vx represents here the total ZPF force in x
 					__syncthreads();
-					g(k1vy[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
+					k1vy[threadIdx.x]=k1vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
 					__syncthreads();
-					h(k1vz[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
+					k1vz[threadIdx.x]=k1vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
 				}
 			}
-			gL(k1vy[threadIdx.x],tn,yn,zn,vzn); // Laser contribution to the total force in y
-			hL(k1vz[threadIdx.x],tn,yn,zn,vyn); // Laser contribution to the total force in z
-
 			__syncthreads();
-			tn=tn+dt/2.0;
-/*
+			k1vy[threadIdx.x]=k1vy[threadIdx.x]+gL(tn,yn,zn,vzn); // Laser contribution to the total force in y
 			__syncthreads();
-			xn=xn+(dt/2.0)*vxn;
-			__syncthreads();
-			yn=yn+(dt/2.0)*vyn;
-			__syncthreads();
-			zn=zn+(dt/2.0)*vzn;
-
-			__syncthreads();
-			vxn=vxn+(dt/2.0)*k1vx[threadIdx.x];
-			__syncthreads();
-			vyn=vyn+(dt/2.0)*k1vy[threadIdx.x];
-			__syncthreads();
-			vzn=vzn+(dt/2.0)*k1vz[threadIdx.x];
-
-			for(int i=0;i<Nk;i++){
-				for(int j=0;j<Ne;j++){
-					__syncthreads();
-					f(k2vx[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k2vx represents here the total force in x
-					__syncthreads();
-					g(k2vy[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k2vy represents here the total force in y
-					__syncthreads();
-					h(k2vz[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k2vz represents here the total force in z
-				}
-			}
-			gL(k2vy[threadIdx.x],tn,yn,zn,vzn); // Laser contribution to the total force in y
-			hL(k2vz[threadIdx.x],tn,yn,zn,vyn); // Laser contribution to the total force in z
-
-
-			k2x=vxn;
-			k2y=vyn;
-			k2z=vzn;
-
-			__syncthreads();
-			vxn=vxn-(dt/2.0)*k1vx[threadIdx.x];
-			__syncthreads();
-			vyn=vyn-(dt/2.0)*k1vy[threadIdx.x];
-			__syncthreads();
-			vzn=vzn-(dt/2.0)*k1vz[threadIdx.x];
-
-			__syncthreads();
-			xn=xn+pow(dt/2.0,2.0)*k1vx[threadIdx.x];
-			__syncthreads();
-			yn=yn+pow(dt/2.0,2.0)*k1vy[threadIdx.x];
-			__syncthreads();
-			zn=zn+pow(dt/2.0,2.0)*k1vz[threadIdx.x];
-
-			__syncthreads();
-			vxn=vxn+(dt/2.0)*k2vx[threadIdx.x];
-			__syncthreads();
-			vyn=vyn+(dt/2.0)*k2vy[threadIdx.x];
-			__syncthreads();
-			vzn=vzn+(dt/2.0)*k2vz[threadIdx.x];
-
-			for(int i=0;i<Nk;i++){
-				for(int j=0;j<Ne;j++){
-					__syncthreads();
-					f(k3vx[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k3vx represents here the total force in x
-					__syncthreads();
-					g(k3vy[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k3vy represents here the total force in y
-					__syncthreads();
-					h(k3vz[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k3vz represents here the total force in z
-				}
-			}
-			gL(k3vy[threadIdx.x],tn,yn,zn,vzn); // Laser contribution to the total force in y
-			hL(k3vz[threadIdx.x],tn,yn,zn,vyn); // Laser contribution to the total force in z
+			k1vz[threadIdx.x]=k1vz[threadIdx.x]+hL(tn,yn,zn,vyn); // Laser contribution to the total force in z
 
 			__syncthreads();
 			tn=tn+dt/2.0;
 
-			__syncthreads();
-			xn=xn+dt*(vxn-k2x/2.0);
-			__syncthreads();
-			yn=yn+dt*(vyn-k2y/2.0);
-			__syncthreads();
-			zn=zn+dt*(vzn-k2z/2.0);
-
-			__syncthreads();
-			vxn=vxn-(dt/2.0)*k2vx[threadIdx.x];
-			__syncthreads();
-			vyn=vyn-(dt/2.0)*k2vy[threadIdx.x];
-			__syncthreads();
-			vzn=vzn-(dt/2.0)*k2vz[threadIdx.x];
-
-			__syncthreads();
-			vxn=vxn+dt*k3vx[threadIdx.x];
-			__syncthreads();
-			vyn=vyn+dt*k3vy[threadIdx.x];
-			__syncthreads();
-			vzn=vzn+dt*k3vz[threadIdx.x];
-
-
-			for(int i=0;i<Nk;i++){
-				for(int j=0;j<Ne;j++){
-					__syncthreads();
-					f(vxnn,k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k4vx (stored in vxnn) represents here the total force in x
-					__syncthreads();
-					g(vynn,k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k4vy (stored in vynn) represents here the total force in y
-					__syncthreads();
-					h(vznn,k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k4vz (stored in vznn) represents here the total force in z
-				}
-			}
-			gL(vynn,tn,yn,zn,vzn); // Laser contribution to the total force in y
-			hL(vznn,tn,yn,zn,vyn); // Laser contribution to the total force in z
-
-			__syncthreads();
-			vxnn=(dt/6.0)*vxnn;
-			__syncthreads();
-			vynn=(dt/6.0)*vynn;
-			__syncthreads();
-			vznn=(dt/6.0)*vznn;
-
-			__syncthreads();
-			vxn=vxn-dt*k3vx[threadIdx.x];
-			__syncthreads();
-			vyn=vyn-dt*k3vy[threadIdx.x];
-			__syncthreads();
-			vzn=vzn-dt*k3vz[threadIdx.x];
-
-			__syncthreads();
-			vxnn=vxnn+vxn+(dt/6.0)*(k1vx[threadIdx.x]+2.0*k2vx[threadIdx.x]+2.0*k3vx[threadIdx.x]);
-			__syncthreads();
-			vynn=vynn+vyn+(dt/6.0)*(k1vy[threadIdx.x]+2.0*k2vy[threadIdx.x]+2.0*k3vy[threadIdx.x]);
-			__syncthreads();
-			vznn=vznn+vzn+(dt/6.0)*(k1vz[threadIdx.x]+2.0*k2vz[threadIdx.x]+2.0*k3vz[threadIdx.x]);
-
-			__syncthreads();
-			xn=xn-dt*(vxn+(dt/2.0)*k2vx[threadIdx.x]);
-			__syncthreads();
-			yn=yn-dt*(vyn+(dt/2.0)*k2vy[threadIdx.x]);
-			__syncthreads();
-			zn=zn-dt*(vzn+(dt/2.0)*k2vz[threadIdx.x]);
-
-			__syncthreads();
-			xn=xn+(dt/6.0)*(4.0*vxn+2*k2x+dt*(k2vx[threadIdx.x]+k3vx[threadIdx.x]));
-			__syncthreads();
-			yn=yn+(dt/6.0)*(4.0*vyn+2*k2y+dt*(k2vy[threadIdx.x]+k3vy[threadIdx.x]));
-			__syncthreads();
-			zn=zn+(dt/6.0)*(4.0*vzn+2*k2z+dt*(k2vz[threadIdx.x]+k3vz[threadIdx.x]));
-
-			vxn=vxnn;
-			vyn=vynn;
-			vzn=vznn;
-*/
+			k1x=vxn;
+			k1y=vyn;
+			k1z=vzn;
+			
 			for(int i=0;i<Nk;i++){ // k2
 				for(int j=0;j<Ne;j++){
 					__syncthreads();
-					f(k2vx[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*vxn/2.0,yn+dt*vyn/2.0,zn+dt*vzn/2.0,vyn+dt*k1vy[threadIdx.x]/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // k2vx represents here the total force in x
+					k2vx[threadIdx.x]=k2vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k1x/2.0,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vyn+dt*k1vy[threadIdx.x]/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // k2vx represents here the total force in x
 					__syncthreads();
-					g(k2vy[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*vxn/2.0,yn+dt*vyn/2.0,zn+dt*vzn/2.0,vxn+dt*k1vx[threadIdx.x]/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // k2vy represents here the total force in y
+					k2vy[threadIdx.x]=k2vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k1x/2.0,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vxn+dt*k1vx[threadIdx.x]/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // k2vy represents here the total force in y
 					__syncthreads();
-					h(k2vz[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*vxn/2.0,yn+dt*vyn/2.0,zn+dt*vzn/2.0,vxn+dt*k1vx[threadIdx.x]/2.0,vyn+dt*k1vy[threadIdx.x]/2.0); // k2vz represents here the total force in z
+					k2vz[threadIdx.x]=k2vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k1x/2.0,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vxn+dt*k1vx[threadIdx.x]/2.0,vyn+dt*k1vy[threadIdx.x]/2.0); // k2vz represents here the total force in z
 				}
 			}
-			gL(k2vy[threadIdx.x],tn,yn+dt*vyn/2.0,zn+dt*vzn/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // Laser contribution to the total force in y
-			hL(k2vz[threadIdx.x],tn,yn+dt*vyn/2.0,zn+dt*vzn/2.0,vyn+dt*k1vy[threadIdx.x]/2.0); // Laser contribution to the total force in z
+			__syncthreads();
+			k2vy[threadIdx.x]=k2vy[threadIdx.x]+gL(tn,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // Laser contribution to the total force in y
+			__syncthreads();
+			k2vz[threadIdx.x]=k2vz[threadIdx.x]+hL(tn,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vyn+dt*k1vy[threadIdx.x]/2.0); // Laser contribution to the total force in z
+
+			__syncthreads();
+			k2x=vxn+dt*k1vx[threadIdx.x]/2.0;
+			__syncthreads();
+			k2y=vyn+dt*k1vy[threadIdx.x]/2.0;
+			__syncthreads();
+			k2z=vzn+dt*k1vz[threadIdx.x]/2.0;
 
 			for(int i=0;i<Nk;i++){ // k3
 				for(int j=0;j<Ne;j++){
 					__syncthreads();
-					f(k3vx[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*(vxn+dt*k1vx[threadIdx.x]/2.0)/2.0,yn+dt*(vyn+dt*k1vy[threadIdx.x]/2.0)/2.0,zn+dt*(vzn+dt*k1vz[threadIdx.x]/2.0)/2.0,vyn+dt*k2vy[threadIdx.x]/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // k3vx represents here the total force in x
+					k3vx[threadIdx.x]=k3vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k2x/2.0,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vyn+dt*k2vy[threadIdx.x]/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // k3vx represents here the total force in x
 					__syncthreads();
-					g(k3vy[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*(vxn+dt*k1vx[threadIdx.x]/2.0)/2.0,yn+dt*(vyn+dt*k1vy[threadIdx.x]/2.0)/2.0,zn+dt*(vzn+dt*k1vz[threadIdx.x]/2.0)/2.0,vxn+dt*k2vx[threadIdx.x]/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // k3vy represents here the total force in y
+					k3vy[threadIdx.x]=k3vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k2x/2.0,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vxn+dt*k2vx[threadIdx.x]/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // k3vy represents here the total force in y
 					__syncthreads();
-					h(k3vz[threadIdx.x],k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*(vxn+dt*k1vx[threadIdx.x]/2.0)/2.0,yn+dt*(vyn+dt*k1vy[threadIdx.x]/2.0)/2.0,zn+dt*(vzn+dt*k1vz[threadIdx.x]/2.0)/2.0,vxn+dt*k2vx[threadIdx.x]/2.0,vyn+dt*k2vy[threadIdx.x]/2.0); // k3vz represents here the total force in z
+					k3vz[threadIdx.x]=k3vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k2x/2.0,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vxn+dt*k2vx[threadIdx.x]/2.0,vyn+dt*k2vy[threadIdx.x]/2.0); // k3vz represents here the total force in z
 				}
 			}
-			gL(k3vy[threadIdx.x],tn,yn+dt*(vyn+dt*k1vy[threadIdx.x]/2.0)/2.0,zn+dt*(vzn+dt*k1vz[threadIdx.x]/2.0)/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // Laser contribution to the total force in y
-			hL(k3vz[threadIdx.x],tn,yn+dt*(vyn+dt*k1vy[threadIdx.x]/2.0)/2.0,zn+dt*(vzn+dt*k1vz[threadIdx.x]/2.0)/2.0,vyn+dt*k2vy[threadIdx.x]/2.0); // Laser contribution to the total force in z
+			__syncthreads();
+			k3vy[threadIdx.x]=k3vy[threadIdx.x]+gL(tn,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // Laser contribution to the total force in y
+			__syncthreads();
+			k3vz[threadIdx.x]=k3vz[threadIdx.x]+hL(tn,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vyn+dt*k2vy[threadIdx.x]/2.0); // Laser contribution to the total force in z
 
 			__syncthreads();
 			tn=tn+dt/2.0;
@@ -877,40 +739,36 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 			for(int i=0;i<Nk;i++){ // k4
 				for(int j=0;j<Ne;j++){
 					__syncthreads();
-					f(vxnn,k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vyn+dt*k3vy[threadIdx.x],vzn+dt*k3vz[threadIdx.x]); // k4vx (stored in vxnn) represents here the total force in x
+					k4vx=k4vx+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vyn+dt*k3vy[threadIdx.x],vzn+dt*k3vz[threadIdx.x]); // k4vx represents here the total force in x
 					__syncthreads();
-					g(vynn,k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vxn+dt*k3vx[threadIdx.x],vzn+dt*k3vz[threadIdx.x]); // k4vy (stored in vynn) represents here the total force in y
+					k4vy=k4vy+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vxn+dt*k3vx[threadIdx.x],vzn+dt*k3vz[threadIdx.x]); // k4vy represents here the total force in y
 					__syncthreads();
-					h(vznn,k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vxn+dt*k3vx[threadIdx.x],vyn+dt*k3vy[threadIdx.x]); // k4vz (stored in vznn) represents here the total force in z
+					k4vz=k4vz+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vxn+dt*k3vx[threadIdx.x],vyn+dt*k3vy[threadIdx.x]); // k4vz represents here the total force in z
 				}
 			}
-			gL(vynn,tn,yn+dt*k3y,zn+dt*k3z,vzn+dt*k3vz[threadIdx.x]); // Laser contribution to the total force in y
-			hL(vznn,tn,yn+dt*k3y,zn+dt*k3z,vyn+dt*k3vy[threadIdx.x]); // Laser contribution to the total force in z
+			k4vy=k4vy+gL(tn,yn+dt*k3y,zn+dt*k3z,vzn+dt*k3vz[threadIdx.x]); // Laser contribution to the total force in y
+			k4vz=k4vz+hL(tn,yn+dt*k3y,zn+dt*k3z,vyn+dt*k3vy[threadIdx.x]); // Laser contribution to the total force in z
 
 			__syncthreads();
-			xn=xn+dt*vxn+pow(dt,2.0)*(k1vx[threadIdx.x]+k2vx[threadIdx.x]+k3vx[threadIdx.x])/6.0;
+			xn=xn+dt*(k1x+2.0*k2x+2.0*k3x+k4x)/6.0;
 			__syncthreads();
-			yn=yn+dt*vyn+pow(dt,2.0)*(k1vy[threadIdx.x]+k2vy[threadIdx.x]+k3vy[threadIdx.x])/6.0;
+			yn=yn+dt*(k1y+2.0*k2y+2.0*k3y+k4y)/6.0;
 			__syncthreads();
-			zn=zn+dt*vzn+pow(dt,2.0)*(k1vz[threadIdx.x]+k2vz[threadIdx.x]+k3vz[threadIdx.x])/6.0;
+			zn=zn+dt*(k1z+2.0*k2z+2.0*k3z+k4z)/6.0;
 
 			__syncthreads();
-			vxnn=vxn+dt*(k1vx[threadIdx.x]+2.0*k2vx[threadIdx.x]+2.0*k3vx[threadIdx.x]+vxnn)/6.0;
+			vxn=vxn+dt*(k1vx[threadIdx.x]+2.0*k2vx[threadIdx.x]+2.0*k3vx[threadIdx.x]+k4vx)/6.0;
 			__syncthreads();
-			vynn=vyn+dt*(k1vy[threadIdx.x]+2.0*k2vy[threadIdx.x]+2.0*k3vy[threadIdx.x]+vynn)/6.0;;
+			vyn=vyn+dt*(k1vy[threadIdx.x]+2.0*k2vy[threadIdx.x]+2.0*k3vy[threadIdx.x]+k4vy)/6.0;;
 			__syncthreads();
-			vznn=vzn+dt*(k1vz[threadIdx.x]+2.0*k2vz[threadIdx.x]+2.0*k3vz[threadIdx.x]+vznn)/6.0;
-
-			vxn=vxnn;
-			vyn=vynn;
-			vzn=vznn;
+			vzn=vzn+dt*(k1vz[threadIdx.x]+2.0*k2vz[threadIdx.x]+2.0*k3vz[threadIdx.x]+k4vz)/6.0;
 		}
 		__syncthreads();
 		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
 	}
 }
-	
-__device__ void f(double &kv,double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component
+/*
+__device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component (Wayne-Herman version)
 	__syncthreads();
 	double w=k*c;
 
@@ -919,7 +777,97 @@ __device__ void f(double &kv,double const &k,double const &theta,double const &p
 	__syncthreads();
 	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
 
-/*	double E0;
+	__syncthreads();
+	double E0=10.0*sqrt(hbar*w/(eps0*V));
+
+	__syncthreads();
+	return q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*cos(phi)*cos(xi)-sin(phi)*sin(xi))/m+q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vy+(cos(theta)*sin(phi)*sin(xi)-cos(phi)*cos(xi))*vz)/(m*c);
+}
+*/
+/*
+__device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component (WH+multiple Fourier modes)
+	__syncthreads();
+	double w=k*c;
+
+	__syncthreads();
+	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	__syncthreads();
+	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+
+	double E0;
+	if(k==kR/2.0){
+		__syncthreads();
+		E0=sqrt(2.0/(3.0*pi))*E0L;
+	}else if(k==kR){
+		__syncthreads();
+		E0=sqrt(1.0/2.0)*E0L;
+	}else if(k==3.0*kR/2.0){
+		__syncthreads();
+		E0=sqrt(6.0/(5.0*pi))*E0L;
+	}else{
+		__syncthreads();
+		E0=sqrt(hbar*w/(eps0*V));
+	}
+	return 0.0;
+}
+*/
+
+__device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component (Single explicit Fourier mode)
+	__syncthreads();
+	double w=k*c;
+
+	__syncthreads();
+	double phi1=w*t-k*y+eta;
+	__syncthreads();
+	double phi2=w*t+k*y+eta;
+
+	double E0;
+	if(k==kR/2.0){
+		__syncthreads();
+		E0=sqrt(2.0/(3.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0))); // SHOULD I USE LASER GAUSSIAN PROFILE HERE OR NOT?
+	}else if(k==kR){
+		__syncthreads();
+		E0=sqrt(1.0/2.0)*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
+	}else if(k==3.0*kR/2.0){
+		__syncthreads();
+		E0=sqrt(6.0/(5.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
+	}else{
+		__syncthreads();
+		E0=sqrt(hbar*w/(eps0*V));
+	}
+	//__syncthreads();
+	//return q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vy+(cos(theta)*sin(phi)*sin(xi)-cos(phi)*cos(xi))*vz)/(m*c);
+	return 0.0;
+}
+
+/*
+__device__ double g(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (Wayne-Herman version)
+	__syncthreads();
+	double w=k*c;
+
+	__syncthreads();
+	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	__syncthreads();
+	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+
+	__syncthreads();
+	double E0=10.0*sqrt(hbar*w/(eps0*V));
+
+	__syncthreads();
+	return q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*sin(phi)*cos(xi)+cos(phi)*sin(xi))/m-q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vx+(cos(theta)*cos(phi)*sin(xi)+sin(phi)*cos(xi))*vz)/(m*c);
+}
+*/
+/*
+__device__ double g(double &kv,double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (WH+multiple Fourier modes)
+	__syncthreads();
+	double w=k*c;
+
+	__syncthreads();
+	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	__syncthreads();
+	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+
+	double E0;
 	if(k==kR/2.0){
 		__syncthreads();
 		E0=sqrt(2.0/(3.0*pi))*E0L;
@@ -933,56 +881,38 @@ __device__ void f(double &kv,double const &k,double const &theta,double const &p
 		__syncthreads();
 		E0=sqrt(hbar*w/(eps0*V));
 	}
-	kv=0.0;
-*/	
 	__syncthreads();
-	double E0=sqrt(hbar*w/(eps0*V));
-
-	__syncthreads();
-	kv=kv+q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*cos(phi)*cos(xi)-sin(phi)*sin(xi))/m;
-
-	__syncthreads();
-	kv=kv+q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vy+(cos(theta)*sin(phi)*sin(xi)-cos(phi)*cos(xi))*vz)/(m*c);
-
+	return -q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
 }
-
-__device__ void g(double &kv,double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component
-	__syncthreads();
-	double w=k*c;
-
-	__syncthreads();
-	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-	__syncthreads();
-	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-
-/*	double E0;
-	if(k==kR/2.0){
-		__syncthreads();
-		E0=sqrt(2.0/(3.0*pi))*E0L;
-	}else if(k==kR){
-		__syncthreads();
-		E0=(1/sqrt(2.0))*E0L;
-	}else if(k==3.0*kR/2.0){
-		__syncthreads();
-		E0=sqrt(6.0/(5.0*pi))*E0L;
-	}else{
-		__syncthreads();
-		E0=sqrt(hbar*w/(eps0*V));
-	}
-	kv-=q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
 */
+
+__device__ double g(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (Single explicit Fourier mode)
 	__syncthreads();
-	double E0=sqrt(hbar*w/(eps0*V));
+	double w=k*c;
 
 	__syncthreads();
-	kv=kv+q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*sin(phi)*cos(xi)+cos(phi)*sin(xi))/m;
-	
+	double phi1=w*t-k*y+eta;
 	__syncthreads();
-	kv=kv-q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vx+(cos(theta)*cos(phi)*sin(xi)+sin(phi)*cos(xi))*vz)/(m*c);
+	double phi2=w*t+k*y+eta;
 
+	double E0;
+	if(k==kR/2.0){
+		__syncthreads();
+		E0=sqrt(2.0/(3.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
+	}else if(k==kR){
+		__syncthreads();
+		E0=sqrt(1.0/2.0)*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
+	}else if(k==3.0*kR/2.0){
+		__syncthreads();
+		E0=sqrt(6.0/(5.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
+	}else{
+		__syncthreads();
+		E0=sqrt(hbar*w/(eps0*V));
+	}
+	__syncthreads();
+	return -q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
 }
-
-__device__ void gL(double &kv,double const &t,double const &y,double const &z,double const &vz){ // Laser region, y-component
+__device__ double gL(double const &t,double const &y,double const &z,double const &vz){ // Laser region, y-component
 	__syncthreads();
 	double phi1=wL*t-kL*y;
 	__syncthreads();
@@ -992,10 +922,10 @@ __device__ void gL(double &kv,double const &t,double const &y,double const &z,do
 	double E0=E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
 	
 	__syncthreads();
-	kv+=q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
+	return q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
 }
-
-__device__ void h(double &kv,double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component
+/*
+__device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component (Wayne-Herman version)
 	__syncthreads();
 	double w=k*c;
 
@@ -1004,7 +934,24 @@ __device__ void h(double &kv,double const &k,double const &theta,double const &p
 	__syncthreads();
 	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
 	
-/*	double E0
+	__syncthreads();
+	double E0=10.0*sqrt(hbar*w/(eps0*V));
+
+	__syncthreads();
+	return -q*E0*(cos(phi1)+cos(phi2))*(sin(theta)*cos(xi))/m+q*E0*(cos(phi1)-cos(phi2))*((cos(phi)*cos(xi)-cos(theta)*sin(phi)*sin(xi))*vx+(sin(phi)*cos(xi)+cos(theta)*cos(phi)*sin(xi))*vy)/(m*c);
+}
+*/
+/*
+__device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component (WH+multiple Fourier modes)
+	__syncthreads();
+	double w=k*c;
+
+	__syncthreads();
+	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	__syncthreads();
+	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	
+	double E0
 	if(k==kR/2.0){
 		__syncthreads();
 		E0=sqrt(2.0/(3.0*pi))*E0L;
@@ -1018,20 +965,41 @@ __device__ void h(double &kv,double const &k,double const &theta,double const &p
 		__syncthreads();
 		E0=sqrt(hbar*w/(eps0*V));
 	}
-	kv=kv-q*E0*(cos(phi1)+cos(phi2))/m+q*E0*(cos(phi1)-cos(phi2))*vy/(m*c);
-*/	
 	__syncthreads();
-	double E0=sqrt(hbar*w/(eps0*V));
+	return -q*E0*(cos(phi1)+cos(phi2))/m+q*E0*(cos(phi1)-cos(phi2))*vy/(m*c);
+}
+*/
+
+__device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component (Single explicit Fourier mode)
+	__syncthreads();
+	double w=k*c;
 
 	__syncthreads();
-	kv=kv-q*E0*(cos(phi1)+cos(phi2))*(sin(theta)*cos(xi))/m;
-
+	//double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	double phi1=w*t-k*y+eta;
 	__syncthreads();
-	kv=kv+q*E0*(cos(phi1)-cos(phi2))*((cos(phi)*cos(xi)-cos(theta)*sin(phi)*sin(xi))*vx+(sin(phi)*cos(xi)+cos(theta)*cos(phi)*sin(xi))*vy)/(m*c);
-
+	//double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	double phi2=w*t+k*y+eta;
+	
+	double E0;
+	if(k==kR/2.0){
+		__syncthreads();
+		E0=sqrt(2.0/(3.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
+	}else if(k==kR){
+		__syncthreads();
+		E0=sqrt(1.0/2.0)*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
+	}else if(k==3.0*kR/2.0){
+		__syncthreads();
+		E0=sqrt(6.0/(5.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
+	}else{
+		__syncthreads();
+		E0=sqrt(hbar*w/(eps0*V));
+	}
+	__syncthreads();
+	return -q*E0*(cos(phi1)+cos(phi2))/m+q*E0*(cos(phi1)-cos(phi2))*vy/(m*c);
 }
 
-__device__ void hL(double &kv,double const &t,double const &y,double const &z,double const &vy){ // Laser region, z-component
+__device__ double hL(double const &t,double const &y,double const &z,double const &vy){ // Laser region, z-component
 	__syncthreads();
 	double phi1=wL*t-kL*y;
 	__syncthreads();
@@ -1041,5 +1009,5 @@ __device__ void hL(double &kv,double const &t,double const &y,double const &z,do
 	double E0=E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
 	
 	__syncthreads();
-	kv+=q*E0*(cos(phi1)+cos(phi2))/m-q*E0*(cos(phi1)-cos(phi2))*vy/(m*c);
+	return q*E0*(cos(phi1)+cos(phi2))/m-q*E0*(cos(phi1)-cos(phi2))*vy/(m*c);
 }
