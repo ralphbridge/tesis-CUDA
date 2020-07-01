@@ -1,7 +1,7 @@
 #include<cuda_runtime.h>
 #include<stdio.h>
 #include<time.h>
-#include<cuda_runtime.h>
+//#include<cuda_runtime.h>
 #include<curand.h>
 #include<curand_kernel.h>
 #include"math.h"
@@ -88,14 +88,25 @@ void onHost(){
 	time(&rawtime);
 	timeinfo=localtime(&rawtime);
 
-	printf("\nThe current time is %s",asctime(timeinfo));
-
-	const char* name="positions";
+	printf("The current time is %s",asctime(timeinfo));
+	
+	const char* name_k="k-vectors";
+	const char* name_p="screen";
 	const char* format=".txt";
 
-	char filename[512];
-	sprintf(filename,"%s%s%s",name,asctime(timeinfo),format);
-	//printf("The filename is %s",filename.c_str());
+	char day[10];
+
+	strftime(day, sizeof(day)-1, "%d_%H_%M", timeinfo);
+
+	char strtmp[6];
+
+	char filename_k[512];
+	char filename_p[512];
+
+	std::copy(asctime(timeinfo)+4,asctime(timeinfo)+7,strtmp);
+
+	sprintf(filename_k,"%s%s%s%s",name_k,strtmp,day,format);
+	sprintf(filename_p,"%s%s%s%s",name_p,strtmp,day,format);
 
 	double *k_h,*theta_h,*phi_h; // Spherical coordinates for each k-mode (Nk in total)
 	double *eta_h; // Random phases for the ZPF k-modes (Nk in total) <--- Following Boyer's work
@@ -103,7 +114,7 @@ void onHost(){
 	double *xi_h; // Polarization angles in host space
 	double *init_h; // Initial positions (h indicates host allocation)
 	double *v_init_h; // Initial transverse velocities
-	double *positions_h; // Single vector for the initial position, initial transverse velocities and final positions (3N in length for optimization purposes)
+	double *screen_h; // Single vector for the initial position, initial transverse velocities and final positions (3N in length for optimization purposes)
 
 	k_h=(double*)malloc(Nk*sizeof(double));
 	theta_h=(double*)malloc(Nk*sizeof(double));
@@ -119,19 +130,19 @@ void onHost(){
 
 	v_init_h=(double*)malloc(N*sizeof(double));
 
-	positions_h=(double*)malloc(3*N*sizeof(double));
+	screen_h=(double*)malloc(3*N*sizeof(double));
 
-	onDevice(k_h,theta_h,phi_h,eta_h,angles_h,xi_h,init_h,v_init_h,positions_h);
+	onDevice(k_h,theta_h,phi_h,eta_h,angles_h,xi_h,init_h,v_init_h,screen_h);
 
-	k_vec=fopen("k-vectors.txt","w");
+	k_vec=fopen(filename_k,"w");
 	for(int i=0;i<Nk;i++){
 		fprintf(k_vec,"%2.8e,%f,%f,%f\n",k_h[i],angles_h[i],angles_h[Nk+i],angles_h[2*Nk+i]);
 	}
 	fclose(k_vec);
 
-	posit=fopen(filename,"w");
+	posit=fopen(filename_p,"w");
 	for(int i=0;i<N;i++){
-		fprintf(posit,"%2.6e,%2.6e,%2.6e\n",positions_h[i],positions_h[N+i],positions_h[2*N+i]);
+		fprintf(posit,"%2.6e,%2.6e,%2.6e\n",screen_h[i],screen_h[N+i],screen_h[2*N+i]);
 	}
 	fclose(posit);
 
@@ -143,10 +154,10 @@ void onHost(){
 	free(xi_h);
 	free(init_h);
 	free(v_init_h);
-	free(positions_h);
+	free(screen_h);
 }
 
-void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *angles_h,double *xi_h,double *init_h,double *v_init_h,double *positions_h){
+void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *angles_h,double *xi_h,double *init_h,double *v_init_h,double *screen_h){
 	unsigned int blocks=(Nk+TPB-1)/TPB;
 
 	double pi_h=3.1415926535;
@@ -235,7 +246,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double *angles_d;
 	double *init_d; // Vectors in Device (d indicates device allocation)
 	double *v_init_d;
-	double *positions_d;
+	double *screen_d;
 
 	printf("Number of particles (N): %d\n",N);
 	if(hbar_h>0.0){
@@ -266,7 +277,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMalloc((void**)&v_init_d,N*sizeof(double));
 
-	cudaMalloc((void**)&positions_d,3*N*sizeof(double));
+	cudaMalloc((void**)&screen_d,3*N*sizeof(double));
 
 	/* Randomly generated k-modes inside the spherical shell */
 
@@ -359,12 +370,12 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	/* Making a single vector for the initial and final positions (reduces the size of memory, one double pointer instead of two) */
 
 	for(int i=0;i<N;i++){
-		positions_h[i]=init_h[i];
-		positions_h[N+i]=v_init_h[i];
-		positions_h[2*N+i]=0.0;
+		screen_h[i]=init_h[i];
+		screen_h[N+i]=v_init_h[i];
+		screen_h[2*N+i]=0.0;
 	}
 
-	cudaMemcpy(positions_d,positions_h,3*N*sizeof(double),cudaMemcpyHostToDevice);
+	cudaMemcpy(screen_d,screen_h,3*N*sizeof(double),cudaMemcpyHostToDevice);
 
 	cudaEventRecord(stop,0);
 	cudaEventSynchronize(stop);
@@ -373,9 +384,9 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaEventRecord(start,0);
 
-	//paths_euler<<<blocks,TPB>>>(k_d,angles_d,positions_d);
-	//paths_rk2<<<blocks,TPB>>>(k_d,angles_d,positions_d);
-	paths_rk4<<<blocks,TPB>>>(k_d,angles_d,positions_d);
+	//paths_euler<<<blocks,TPB>>>(k_d,angles_d,screen_d);
+	//paths_rk2<<<blocks,TPB>>>(k_d,angles_d,screen_d);
+	paths_rk4<<<blocks,TPB>>>(k_d,angles_d,screen_d);
 
 	cudaEventRecord(stop,0);
 	cudaEventSynchronize(stop);
@@ -385,7 +396,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	printf("Paths computed using RK4 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	printf("------------------------------------------------------------");
 
-	cudaMemcpy(positions_h,positions_d,3*N*sizeof(double),cudaMemcpyDeviceToHost);
+	cudaMemcpy(screen_h,screen_d,3*N*sizeof(double),cudaMemcpyDeviceToHost);
 
 	cudaFree(devStates_kmodes);
 	cudaFree(devStates_eta);
@@ -394,7 +405,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaFree(angles_d);
 	cudaFree(init_d);
 	cudaFree(v_init_d);
-	cudaFree(positions_d);
+	cudaFree(screen_d);
 }
 
 __global__ void setup_kmodes(curandState *state,unsigned long seed){
