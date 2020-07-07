@@ -349,4 +349,91 @@ Random ZPF phases succesfully generated in 1.2268 ms
 Number of blocks (paths): 40
 Positions vector initialized in 3.4313 ms
 Paths computed using RK4 method in 0.0589 hours
+------------------------------------------------------------The current time is Wed Jul  1 18:00:34 2020
+Number of particles (N): 1000
+Quantum version of the KD effect
+wR=3.540698e+15 rad/s
+Delta=7.047107e+15
+kmin=5.718857e+04
+kmax=2.356381e+07
+Vk=5.480562e+22
+V=4.526000e-18
+E0L=2.000000e+08 V/m
+dt=5.915203e-16 s
+Number of k-modes (Nk): 1000
+Number of polarizations (Ne): 10
+Threads per block: 256
+Number of blocks (k-modes): 4
+Random k-modes succesfully generated in 8.4730 ms
+Number of blocks (phases): 4
+Random ZPF phases succesfully generated in 1.5973 ms
+Number of blocks (paths): 4
+Positions vector initialized in 1.6630 ms
+Paths computed using RK4 method in 1.4349 hours
+------------------------------------------------------------
+The current time is Thu Jul  2 18:03:58 2020
+Number of particles (N): 1000
+Quantum version of the KD effect
+wR=3.540698e+15 rad/s
+Delta=7.047107e+15
+kmin=5.718857e+04
+kmax=2.356381e+07
+Vk=5.480562e+22
+V=4.526000e-19
+E0L=2.000000e+08 V/m
+dt=5.915203e-16 s
+Number of k-modes (Nk): 100
+Number of polarizations (Ne): 1
+Threads per block: 256
+Number of blocks (k-modes): 1
+Random k-modes succesfully generated in 8.0093 ms
+Number of blocks (phases): 1
+Random ZPF phases succesfully generated in 1.2344 ms
+Number of blocks (paths): 4
+Positions vector initialized in 1.6742 ms
+Paths computed using RK4 method in 0.0151 hours
+------------------------------------------------------------
+The current time is Thu Jul  2 21:52:10 2020
+Number of particles (N): 1000
+Quantum version of the KD effect
+wR=3.540698e+15 rad/s
+Delta=7.047107e+15
+kmin=5.718857e+04
+kmax=2.356381e+07
+Vk=5.480562e+22
+V=4.526000e-19
+E0L=2.000000e+08 V/m
+dt=5.915203e-16 s
+Number of k-modes (Nk): 100
+Number of polarizations (Ne): 1
+Threads per block: 256
+Number of blocks (k-modes): 1
+Random k-modes succesfully generated in 8.0114 ms
+Number of blocks (phases): 1
+Random ZPF phases succesfully generated in 1.2340 ms
+Number of blocks (paths): 4
+Positions vector initialized in 1.6742 ms
+Paths computed using RK4 method in 0.0151 hours
+------------------------------------------------------------
+The current time is Thu Jul  2 22:07:21 2020
+Number of particles (N): 10000
+Quantum version of the KD effect
+wR=3.540698e+15 rad/s
+Delta=7.047107e+15
+kmin=5.718857e+04
+kmax=2.356381e+07
+Vk=5.480562e+22
+V=4.526000e-18
+E0L=2.000000e+08 V/m
+dt=5.915203e-16 s
+Number of k-modes (Nk): 1000
+Number of polarizations (Ne): 10
+Threads per block: 256
+Number of blocks (k-modes): 4
+Random k-modes succesfully generated in 8.4380 ms
+Number of blocks (phases): 4
+Random ZPF phases succesfully generated in 1.6140 ms
+Number of blocks (paths): 40
+Positions vector initialized in 3.3650 ms
+Paths computed using RK4 method in 2.6366 hours
 ------------------------------------------------------------

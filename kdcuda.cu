@@ -23,8 +23,8 @@ RK4:	43 4-Byte registers, 72 Bytes of shared memory per thread. 1080Ti =>  62.5%
 */
 
 #define N 10000 // Number of electrons
-#define Nk 4 // Number of k-modes
-#define Ne 10 // Number of polarizations per k-mode
+#define Nk 1 // Number of k-modes
+#define Ne 1 // Number of polarizations per k-mode
 
 __constant__ double pi;
 __constant__ double q; // electron charge
@@ -182,7 +182,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double kR_h=2*pi_h/lamR_h;
 	double wR_h=kR_h*c_h;
 
-	double E0L_h=2e8;
+	double E0L_h=1.7777777e8;
 	double D_h=125e-6;
 	double zimp_h=24e-2+D_h;
 	double sigmaL_h=26e-6;
@@ -394,7 +394,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	//printf("Paths computed using Euler method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	//printf("Paths computed using RK2 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	printf("Paths computed using RK4 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
-	printf("------------------------------------------------------------");
+	printf("------------------------------------------------------------\n");
 
 	cudaMemcpy(screen_h,screen_d,3*N*sizeof(double),cudaMemcpyDeviceToHost);
 
@@ -770,7 +770,7 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 			__syncthreads();
 			vxn=vxn+dt*(k1vx[threadIdx.x]+2.0*k2vx[threadIdx.x]+2.0*k3vx[threadIdx.x]+k4vx)/6.0;
 			__syncthreads();
-			vyn=vyn+dt*(k1vy[threadIdx.x]+2.0*k2vy[threadIdx.x]+2.0*k3vy[threadIdx.x]+k4vy)/6.0;;
+			vyn=vyn+dt*(k1vy[threadIdx.x]+2.0*k2vy[threadIdx.x]+2.0*k3vy[threadIdx.x]+k4vy)/6.0;
 			__syncthreads();
 			vzn=vzn+dt*(k1vz[threadIdx.x]+2.0*k2vz[threadIdx.x]+2.0*k3vz[threadIdx.x]+k4vz)/6.0;
 		}
