@@ -1,15 +1,17 @@
 #include<cuda_runtime.h>
 #include<stdio.h>
 #include<time.h>
-//#include<cuda_runtime.h>
 #include<curand.h>
 #include<curand_kernel.h>
-#include"math.h"
+#include<math.h>
 #include<iostream>
 #include<fstream>
 #include<sstream>
+#include<vector>
+#include<algorithm>
 
 #define TPB 256
+#define steps 30000
 
 /*
 When using different methods (Euler, RK2 or RK4) there are different memory settings.
@@ -22,9 +24,9 @@ RK4:	43 4-Byte registers, 72 Bytes of shared memory per thread. 1080Ti =>  62.5%
 ********************************************************************************
 */
 
-#define N 10000 // Number of electrons
-#define Nk 1 // Number of k-modes
-#define Ne 1 // Number of polarizations per k-mode
+#define N 1000 // Number of electrons
+#define Nk 10 // Number of k-modes
+#define Ne 10 // Number of polarizations per k-mode
 
 __constant__ double pi;
 __constant__ double q; // electron charge
@@ -60,7 +62,7 @@ __constant__ double dt; // time step necessary to resolve the electron trajector
 __constant__ double xi[Ne]; // Polarization angles for each k-mode (Ne in total): NOT random, allocated in CONSTANT memory for optimization purposes
 
 void onHost();
-void onDevice(double *k,double *theta,double *phi,double *eta,double *angles,double *xi,double *init,double *v_init,double *positions);
+void onDevice(double *k,double *theta,double *phi,double *eta,double *angles,double *xi,double *init,double *v_init,double *screen);
 
 __global__ void setup_kmodes(curandState *state,unsigned long seed);
 __global__ void kmodes(double *x,curandState *state,int option,int n);
@@ -74,12 +76,50 @@ __device__ double gL(double const &t,double const &y,double const &z,double cons
 __device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy);
 __device__ double hL(double const &t,double const &y,double const &z,double const &vy);
 
+__device__ double dev_traj[3*steps*N];
+__device__ unsigned int dev_count[N];
+
+__device__ void my_push_back(double const &x,double const &y, double const &z,int const &idx){
+	if(dev_count[idx]<steps){
+		/*if(z==0){
+			printf("Initial index: %i for thread %i\n",dev_count[idx],idx);
+		}*/
+		dev_traj[3*steps*idx+3*dev_count[idx]]=x;
+		dev_traj[3*steps*idx+3*dev_count[idx]+1]=y;
+		dev_traj[3*steps*idx+3*dev_count[idx]+2]=z;
+//		return dev_count[idx];
+		//__syncthreads();
+		//if(idx==0){
+			dev_count[idx]=dev_count[idx]+1;
+		//}
+		/*if(z>D){
+			printf("Index offset: %i for thread %i\n",3*steps*idx,idx);
+			printf("Max index: %i for thread %i with y=%f\n",dev_count[idx],idx,y);
+		}*/
+	}else{
+//		return -1;
+		printf("Overflow error\n");
+	}
+}
+
+/*bool isZero(int i){
+	return i==0;
+}*/
+
 int main(){
 	onHost();
 	return 0;
 }
 
 void onHost(){
+
+	float elapsedTime; // Variables to record execution times
+	cudaEvent_t start,stop;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+
+	cudaEventRecord(start,0);
+
 	FILE *k_vec,*posit=NULL;
 
 	time_t rawtime;
@@ -146,6 +186,12 @@ void onHost(){
 	}
 	fclose(posit);
 
+	cudaEventRecord(stop,0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsedTime,start,stop);
+	printf("Total time: %6.4f hours\n",elapsedTime*1e-3/3600.0);
+	printf("------------------------------------------------------------\n");
+
 	free(k_h);
 	free(theta_h);
 	free(phi_h);
@@ -182,7 +228,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double kR_h=2*pi_h/lamR_h;
 	double wR_h=kR_h*c_h;
 
-	double E0L_h=1.7777777e8;
+	double E0L_h=1.7e8;
 	double D_h=125e-6;
 	double zimp_h=24e-2+D_h;
 	double sigmaL_h=26e-6;
@@ -236,10 +282,10 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpyToSymbol(xi,xi_h,Ne*sizeof(double));
 
-	float elapsedTime; // Variables to record execution times
+	/*float elapsedTime; // Variables to record execution times
 	cudaEvent_t start,stop;
 	cudaEventCreate(&start);
-	cudaEventCreate(&stop);
+	cudaEventCreate(&stop);*/
 
 	double *k_d,*theta_d,*phi_d;
 	double *eta_d;
@@ -281,7 +327,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	/* Randomly generated k-modes inside the spherical shell */
 
-	cudaEventRecord(start,0);
+	//cudaEventRecord(start,0);
 
 	curandState *devStates_kmodes;
         cudaMalloc(&devStates_kmodes,Nk*sizeof(curandState));
@@ -303,14 +349,14 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaMemcpy(theta_h,theta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 	cudaMemcpy(phi_h,phi_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 
-	cudaEventRecord(stop,0);
+	/*cudaEventRecord(stop,0);
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&elapsedTime,start,stop);
-	printf("Random k-modes succesfully generated in %6.4f ms\n",elapsedTime);
+	printf("Random k-modes succesfully generated in %6.4f ms\n",elapsedTime);*/
 
 	/* Randomly generated phases for the CPC modes */
 
-	cudaEventRecord(start,0);
+	//cudaEventRecord(start,0);
 
 	curandState *devStates_eta;
 	cudaMalloc(&devStates_eta,Nk*sizeof(curandState));
@@ -327,10 +373,10 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpy(eta_h,eta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 
-	cudaEventRecord(stop,0);
+	/*cudaEventRecord(stop,0);
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&elapsedTime,start,stop);
-	printf("Random ZPF phases succesfully generated in %6.4f ms\n",elapsedTime);
+	printf("Random ZPF phases succesfully generated in %6.4f ms\n",elapsedTime);*/
 
 	/* Making a single vector for theta, phi and eta (reduces the size of memory, one double pointer instead of three) */
 	
@@ -349,7 +395,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	/* Initial positions and transverse momentum*/
 
-	cudaEventRecord(start,0);
+	//cudaEventRecord(start,0);
 
 	curandState *devStates_init;
 	cudaMalloc(&devStates_init,N*sizeof(curandState));
@@ -377,26 +423,64 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpy(screen_d,screen_h,3*N*sizeof(double),cudaMemcpyHostToDevice);
 
-	cudaEventRecord(stop,0);
+	/*cudaEventRecord(stop,0);
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&elapsedTime,start,stop);
-	printf("Positions vector initialized in %6.4f ms\n",elapsedTime);
+	printf("Positions vector initialized in %6.4f ms\n",elapsedTime);*/
 
-	cudaEventRecord(start,0);
+	//cudaEventRecord(start,0);
+
+	int dsize[N];
+	//cudaMemset(dev_count,0,N*sizeof(int));
 
 	//paths_euler<<<blocks,TPB>>>(k_d,angles_d,screen_d);
 	//paths_rk2<<<blocks,TPB>>>(k_d,angles_d,screen_d);
 	paths_rk4<<<blocks,TPB>>>(k_d,angles_d,screen_d);
 
-	cudaEventRecord(stop,0);
+	/*cudaEventRecord(stop,0);
 	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsedTime,start,stop);
+	cudaEventElapsedTime(&elapsedTime,start,stop);*/
 	//printf("Paths computed using Euler method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	//printf("Paths computed using RK2 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
-	printf("Paths computed using RK4 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
-	printf("------------------------------------------------------------\n");
-
+	printf("Paths computed using RK4 method\n"); //in %6.4f hours\n",elapsedTime*1e-3/3600.0);
+	
 	cudaMemcpy(screen_h,screen_d,3*N*sizeof(double),cudaMemcpyDeviceToHost);
+
+	cudaMemcpyFromSymbol(&dsize,dev_count,N*sizeof(int));
+	/*for(unsigned int i=0;i<N;i++){
+		printf("Max index: %i for thread %i\n",dsize[i],i);
+	}*/
+
+	int dsizes=3*steps*N;
+
+	if(dsizes>3*N*steps){
+		printf("Overflow error\n");
+		//return 1;
+	}
+	std::vector<double> results(dsizes);
+	cudaMemcpyFromSymbol(&(results[0]),dev_traj,dsizes*sizeof(double));
+
+	//std::vector<double>::iterator newIter=std::remove_if(results.begin(),results.end(),isZero);
+	//results.resize(newIter-results.begin());
+
+	time_t t=time(0);   // get time now
+	struct tm *now=localtime(&t);
+	char filename_t[80];
+	strftime (filename_t,80,"trajectories%b%d_%H_%M.txt",now);
+
+	std::cout.precision(15);
+	std::ofstream myfile;
+	myfile.open(filename_t);
+
+	if(myfile.is_open()){
+		for(unsigned i=0;i<results.size()-1;i=i+3){
+			if(results[i]+results[i+1]!=0){
+				myfile << std::scientific << results[i] << ',' << results[i+1] << ',' << results[i+2] << '\n';
+			}
+		}
+		std::cout << '\n';
+		myfile.close();
+	}
 
 	cudaFree(devStates_kmodes);
 	cudaFree(devStates_eta);
@@ -418,6 +502,7 @@ __global__ void kmodes(double *vec,curandState *globalState,int opt,int n){
 	curandState localState=globalState[idx];
 	if(idx<n){
 		if(opt==1){ // Random radii
+			/*
 			if(idx==0){
 				vec[idx]=kL/2.0;
 			}else if(idx==1){
@@ -427,32 +512,39 @@ __global__ void kmodes(double *vec,curandState *globalState,int opt,int n){
 			}else{
 				vec[idx]=pow((pow(kmax,3.0)-pow(kmin,3.0))*curand_uniform(&localState)+pow(kmin,3.0),1.0/3.0);
 			}
-			//vec[idx]=pow((pow(kmax,3.0)-pow(kmin,3.0))*curand_uniform(&localState)+pow(kmin,3.0),1.0/3.0);
+			*/
+			vec[idx]=pow((pow(kmax,3.0)-pow(kmin,3.0))*curand_uniform(&localState)+pow(kmin,3.0),1.0/3.0);
 		}else if(opt==2){ // Random polar angles
+			/*
 			if(idx==0||idx==1||idx==2){
 				vec[idx]=pi/2.0;
 			}else{
 				vec[idx]=acos(1.0-2.0*curand_uniform(&localState));
 			}
-			//vec[idx]=acos(1.0-2.0*curand_uniform(&localState));
+			*/
+			vec[idx]=acos(1.0-2.0*curand_uniform(&localState));
 		}else if(opt==3){ // Random azimuthal angles
+			/*
 			if(idx==0||idx==1||idx==2){
 				vec[idx]=pi/2.0;
 			}else{
 				vec[idx]=2.0*pi*curand_uniform(&localState);
 			}
-			//vec[idx]=2.0*pi*curand_uniform(&localState);
+			*/
+			vec[idx]=2.0*pi*curand_uniform(&localState);
 		}else if(opt==4){
 			vec[idx]=sigma*curand_normal(&localState); // Random initial positions
 		}else if(opt==5){
 			vec[idx]=sigma_p*curand_normal(&localState); // Random initial transverse momentum
 		}else if(opt==6){
+			/*
 			if(idx==0||idx==1||idx==2){
 				vec[idx]=0.001;
 			}else{
 				vec[idx]=2.0*pi*curand_uniform(&localState); // Random constant phases
 			}
-			//vec[idx]=2.0*pi*curand_uniform(&localState);
+			*/
+			vec[idx]=2.0*pi*curand_uniform(&localState);
 		}
 		globalState[idx]=localState; // Update current seed state
 	}
@@ -470,17 +562,18 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 		double xn=0.0;
 		double yn=pos[idx];
 		double zn=0.0;
+		my_push_back(xn,yn,zn,idx);
 
 		double vxn=0.0;
 		double vyn=pos[N+idx];
 		__syncthreads();
 		double vzn=v0;
 
-		vxnn[threadIdx.x]=0.0;
-		vynn[threadIdx.x]=0.0;
-		vznn[threadIdx.x]=0.0;
-
 		while(zn<=D){
+			vxnn[threadIdx.x]=0.0;
+			vynn[threadIdx.x]=0.0;
+			vznn[threadIdx.x]=0.0;
+
 			for(int i=0;i<Nk;i++){
 				for(int j=0;j<Ne;j++){
 					__syncthreads();
@@ -508,6 +601,7 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 			yn=yn+dt*vyn;
 			__syncthreads();
 			zn=zn+dt*vzn;
+			my_push_back(xn,yn,zn,idx);
 
 			vxn=vxnn[threadIdx.x];
 			vyn=vynn[threadIdx.x];
@@ -532,6 +626,7 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 		double xn=0.0;
 		double yn=pos[idx];
 		double zn=0.0;
+		my_push_back(xn,yn,zn,idx);
 
 		double vxn=0.0;
 		double vyn=pos[N+idx];
@@ -593,6 +688,8 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 			yn=yn+dt*(vyn+vynn)/2.0;
 			__syncthreads();
 			zn=zn+dt*(vzn+vznn)/2.0;
+
+			my_push_back(xn,yn,zn,idx);
 		}
 		__syncthreads();
 		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
@@ -619,6 +716,8 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 		double xn=0.0;
 		double yn=pos[idx];
 		double zn=0.0;
+
+		my_push_back(xn,yn,zn,idx);
 
 		double vxn=0.0;
 		double vyn=pos[N+idx];;
@@ -767,6 +866,8 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 			__syncthreads();
 			zn=zn+dt*(k1z+2.0*k2z+2.0*k3z+k4z)/6.0;
 
+			my_push_back(xn,yn,zn,idx);
+
 			__syncthreads();
 			vxn=vxn+dt*(k1vx[threadIdx.x]+2.0*k2vx[threadIdx.x]+2.0*k3vx[threadIdx.x]+k4vx)/6.0;
 			__syncthreads();
@@ -778,7 +879,6 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
 	}
 }
-/*
 __device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component (Wayne-Herman version)
 	__syncthreads();
 	double w=k*c;
@@ -789,12 +889,12 @@ __device__ double f(double const &k,double const &theta,double const &phi,double
 	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
 
 	__syncthreads();
-	double E0=10.0*sqrt(hbar*w/(eps0*V));
+	double E0=sqrt(hbar*w/(eps0*V));
 
 	__syncthreads();
 	return q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*cos(phi)*cos(xi)-sin(phi)*sin(xi))/m+q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vy+(cos(theta)*sin(phi)*sin(xi)-cos(phi)*cos(xi))*vz)/(m*c);
 }
-*/
+
 /*
 __device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component (WH+multiple Fourier modes)
 	__syncthreads();
@@ -822,7 +922,7 @@ __device__ double f(double const &k,double const &theta,double const &phi,double
 	return 0.0;
 }
 */
-
+/*
 __device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component (Single explicit Fourier mode)
 	__syncthreads();
 	double w=k*c;
@@ -835,7 +935,7 @@ __device__ double f(double const &k,double const &theta,double const &phi,double
 	double E0;
 	if(k==kR/2.0){
 		__syncthreads();
-		E0=sqrt(2.0/(3.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0))); // SHOULD I USE LASER GAUSSIAN PROFILE HERE OR NOT?
+		E0=sqrt(2.0/(3.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
 	}else if(k==kR){
 		__syncthreads();
 		E0=sqrt(1.0/2.0)*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
@@ -850,8 +950,8 @@ __device__ double f(double const &k,double const &theta,double const &phi,double
 	//return q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vy+(cos(theta)*sin(phi)*sin(xi)-cos(phi)*cos(xi))*vz)/(m*c);
 	return 0.0;
 }
+*/
 
-/*
 __device__ double g(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (Wayne-Herman version)
 	__syncthreads();
 	double w=k*c;
@@ -862,12 +962,12 @@ __device__ double g(double const &k,double const &theta,double const &phi,double
 	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
 
 	__syncthreads();
-	double E0=10.0*sqrt(hbar*w/(eps0*V));
+	double E0=sqrt(hbar*w/(eps0*V));
 
 	__syncthreads();
 	return q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*sin(phi)*cos(xi)+cos(phi)*sin(xi))/m-q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vx+(cos(theta)*cos(phi)*sin(xi)+sin(phi)*cos(xi))*vz)/(m*c);
 }
-*/
+
 /*
 __device__ double g(double &kv,double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (WH+multiple Fourier modes)
 	__syncthreads();
@@ -896,7 +996,7 @@ __device__ double g(double &kv,double const &k,double const &theta,double const 
 	return -q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
 }
 */
-
+/*
 __device__ double g(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (Single explicit Fourier mode)
 	__syncthreads();
 	double w=k*c;
@@ -923,6 +1023,7 @@ __device__ double g(double const &k,double const &theta,double const &phi,double
 	__syncthreads();
 	return -q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
 }
+*/
 __device__ double gL(double const &t,double const &y,double const &z,double const &vz){ // Laser region, y-component
 	__syncthreads();
 	double phi1=wL*t-kL*y;
@@ -935,7 +1036,7 @@ __device__ double gL(double const &t,double const &y,double const &z,double cons
 	__syncthreads();
 	return q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
 }
-/*
+
 __device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component (Wayne-Herman version)
 	__syncthreads();
 	double w=k*c;
@@ -946,12 +1047,12 @@ __device__ double h(double const &k,double const &theta,double const &phi,double
 	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
 	
 	__syncthreads();
-	double E0=10.0*sqrt(hbar*w/(eps0*V));
+	double E0=sqrt(hbar*w/(eps0*V));
 
 	__syncthreads();
 	return -q*E0*(cos(phi1)+cos(phi2))*(sin(theta)*cos(xi))/m+q*E0*(cos(phi1)-cos(phi2))*((cos(phi)*cos(xi)-cos(theta)*sin(phi)*sin(xi))*vx+(sin(phi)*cos(xi)+cos(theta)*cos(phi)*sin(xi))*vy)/(m*c);
 }
-*/
+
 /*
 __device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component (WH+multiple Fourier modes)
 	__syncthreads();
@@ -980,7 +1081,7 @@ __device__ double h(double const &k,double const &theta,double const &phi,double
 	return -q*E0*(cos(phi1)+cos(phi2))/m+q*E0*(cos(phi1)-cos(phi2))*vy/(m*c);
 }
 */
-
+/*
 __device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component (Single explicit Fourier mode)
 	__syncthreads();
 	double w=k*c;
@@ -1009,7 +1110,7 @@ __device__ double h(double const &k,double const &theta,double const &phi,double
 	__syncthreads();
 	return -q*E0*(cos(phi1)+cos(phi2))/m+q*E0*(cos(phi1)-cos(phi2))*vy/(m*c);
 }
-
+*/
 __device__ double hL(double const &t,double const &y,double const &z,double const &vy){ // Laser region, z-component
 	__syncthreads();
 	double phi1=wL*t-kL*y;
