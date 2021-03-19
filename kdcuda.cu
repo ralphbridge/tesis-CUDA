@@ -11,7 +11,6 @@
 #include<algorithm>
 
 #define TPB 256
-#define steps 30000
 
 /*
 When using different methods (Euler, RK2 or RK4) there are different memory settings.
@@ -24,9 +23,19 @@ RK4:	43 4-Byte registers, 72 Bytes of shared memory per thread. 1080Ti =>  62.5%
 ********************************************************************************
 */
 
-#define N 1000 // Number of electrons
-#define Nk 10 // Number of k-modes
-#define Ne 10 // Number of polarizations per k-mode
+#define N 2000 // Number of electrons
+#define Nk 1000 // Number of k-modes
+#define Ne 5 // Number of polarizations per k-mode
+
+#define coq 0 // Trajectories ON(1) or OFF(0)
+
+#if coq!=0
+	#define steps 30000
+	__device__ double dev_traj[3*steps*N]; // Record single paths (quantum only)
+#else
+	#define steps 1
+	__device__ double dev_traj[1];
+#endif
 
 __constant__ double pi;
 __constant__ double q; // electron charge
@@ -76,7 +85,6 @@ __device__ double gL(double const &t,double const &y,double const &z,double cons
 __device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy);
 __device__ double hL(double const &t,double const &y,double const &z,double const &vy);
 
-__device__ double dev_traj[3*steps*N];
 __device__ unsigned int dev_count[N];
 
 __device__ void my_push_back(double const &x,double const &y, double const &z,int const &idx){
@@ -97,8 +105,7 @@ __device__ void my_push_back(double const &x,double const &y, double const &z,in
 			printf("Max index: %i for thread %i with y=%f\n",dev_count[idx],idx,y);
 		}*/
 	}else{
-//		return -1;
-		printf("Overflow error\n");
+		printf("Overflow error hijole\n");
 	}
 }
 
@@ -203,14 +210,15 @@ void onHost(){
 	free(screen_h);
 }
 
+#if coq!=0  // trajectories ON
 void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *angles_h,double *xi_h,double *init_h,double *v_init_h,double *screen_h){
 	unsigned int blocks=(Nk+TPB-1)/TPB;
 
 	double pi_h=3.1415926535;
 	double q_h=1.6e-19;
 	double m_h=9.10938356e-31;
-	double hbar_h=1.0545718e-34;
-//	double hbar_h=0; // uncomment this line to see classical results
+	double hbar_h=1.0545718e-34; // Quantum results
+//	double hbar_h=0; // Classical results
 	double c_h=299792458.0;
 	double eps0_h=8.85e-12;
 	double v0_h=1.1e7;
@@ -228,7 +236,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double kR_h=2*pi_h/lamR_h;
 	double wR_h=kR_h*c_h;
 
-	double E0L_h=1.7e8;
+	double IL=1e14;
+	double E0L_h=pow(2.0*IL/(c_h*eps0_h),0.5);
 	double D_h=125e-6;
 	double zimp_h=24e-2+D_h;
 	double sigmaL_h=26e-6;
@@ -277,7 +286,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	/* Polarization modes allocation (in CONSTANT memory) */
 	for(int i=0;i<Ne;i++){
-		xi_h[i]=i*2*pi_h/Ne;
+		xi_h[i]=i*(4.0*pi_h/2.0)/Ne;
 	}
 
 	cudaMemcpyToSymbol(xi,xi_h,Ne*sizeof(double));
@@ -296,20 +305,30 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	printf("Number of particles (N): %d\n",N);
 	if(hbar_h>0.0){
-		printf("Quantum version of the KD effect\n");
-		printf("wR=%2.6e rad/s\n",wR_h);
-		printf("Delta=%2.6e\n",Delta_h);
-		printf("kmin=%2.6e\n",kmin_h);
-		printf("kmax=%2.6e\n",kmax_h);
-		printf("Vk=%2.6e\n",Vk_h);
-		printf("V=%2.6e\n",V_h);
-	}else printf("Classical version of the KD effect\n");
+		printf("Quantum version of the KD effect: Trajectories ON\n");
+		printf("Number of particles (N): %d\n",N);
+		printf("Number of k-modes (Nk): %d\n",Nk);
+		printf("Number of polarizations (Ne): %d\n",Ne);
+		printf("Delta=%2.6e rad/s\n",Delta_h);
+		printf("kmin=%2.6e 1/m\n",kmin_h);
+		printf("kmax=%2.6e 1/m\n",kmax_h);
+		printf("Vk=%2.6e 1/m^3\n",Vk_h);
+		printf("V=%2.6e m^3\n",V_h);
+		printf("sigmaL=%2.6e um\n",sigmaL_h);
+		printf("sigmap=%2.6e kg*m/s\n",sigma_p_h);
+	}else{
+		printf("Classical version of the KD effect: Trajectories ON\n");
+		printf("Number of particles (N): %d\n",N);
+		printf("Number of k-modes (Nk): %d\n",Nk);
+		printf("Number of polarizations (Ne): %d\n",Ne);
+	}
+	printf("wL=%2.6e rad/s\n",wR_h);
+	printf("IL=%2.6e V/m\n",IL);
 	printf("E0L=%2.6e V/m\n",E0L_h);
 	printf("dt=%2.6e s\n",dt_h);
-	printf("Number of k-modes (Nk): %d\n",Nk);
-	printf("Number of polarizations (Ne): %d\n",Ne);
 	printf("Threads per block: %d\n",TPB);
 	printf("Number of blocks (k-modes): %d\n",blocks);
+
 
 	cudaMalloc((void**)&k_d,Nk*sizeof(double));
 	cudaMalloc((void**)&theta_d,Nk*sizeof(double));
@@ -453,9 +472,9 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	int dsizes=3*steps*N;
 
-	if(dsizes>3*N*steps){
+	if(dsizes>3*steps*N){
 		printf("Overflow error\n");
-		//return 1;
+		abort();
 	}
 	std::vector<double> results(dsizes);
 	cudaMemcpyFromSymbol(&(results[0]),dev_traj,dsizes*sizeof(double));
@@ -491,6 +510,269 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaFree(v_init_d);
 	cudaFree(screen_d);
 }
+#else //Classical results
+void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *angles_h,double *xi_h,double *init_h,double *v_init_h,double *screen_h){
+	unsigned int blocks=(Nk+TPB-1)/TPB;
+
+	double pi_h=3.1415926535;
+	double q_h=1.6e-19;
+	double m_h=9.10938356e-31;
+	double hbar_h=1.0545718e-34; // Quantum results
+//	double hbar_h=0.0; //Classical results
+	double c_h=299792458.0;
+	double eps0_h=8.85e-12;
+	double v0_h=1.1e7;
+	double fwhm_h=25e-6;
+	double sigma_h=fwhm_h/(2.0*sqrt(2.0*log(2.0)));
+
+	double lamL_h=532e-9;
+	double kL_h=2*pi_h/lamL_h;
+	double wL_h=kL_h*c_h;
+
+	double sigma_p_h=4.0*pi_h*(1.0545718e-34)/(lamL_h*sqrt(2.0*log(2.0)));
+
+	double lamR_h=lamL_h;
+//	double lamR_h=2*pi_h*hbar_h/(m_h*v0_h);
+	double kR_h=2*pi_h/lamR_h;
+	double wR_h=kR_h*c_h;
+
+	double IL=1e14;
+	double E0L_h=pow(2.0*IL/(c_h*eps0_h),0.5);
+	double D_h=125e-6;
+	double zimp_h=24e-2+D_h;
+	double sigmaL_h=9.8e-6;
+
+	double damping_h=6.245835e-24;
+	double Delta_h=9e7*damping_h*pow(wR_h,2.0);
+	double kmin_h=(wR_h-Delta_h/2.0)/c_h;
+	double kmax_h=(wR_h+Delta_h/2.0)/c_h;
+	double Vk_h=4.0*pi_h*(pow(kmax_h,3.0)-pow(kmin_h,3.0))/3.0;
+	double V_h=pow(2.0*pi_h,3.0)*Nk/Vk_h;
+
+	double dt_h=pi_h/(1.5*wR_h);
+//	double dt_h=1.0/(0.1*wR_h);
+
+	cudaMemcpyToSymbol(pi,&pi_h,sizeof(double));
+	cudaMemcpyToSymbol(q,&q_h,sizeof(double));
+	cudaMemcpyToSymbol(m,&m_h,sizeof(double));
+	cudaMemcpyToSymbol(hbar,&hbar_h,sizeof(double));
+	cudaMemcpyToSymbol(c,&c_h,sizeof(double));
+	cudaMemcpyToSymbol(eps0,&eps0_h,sizeof(double));
+	cudaMemcpyToSymbol(v0,&v0_h,sizeof(double));
+	cudaMemcpyToSymbol(sigma,&sigma_h,sizeof(double));
+
+	cudaMemcpyToSymbol(lamL,&lamL_h,sizeof(double));
+	cudaMemcpyToSymbol(kL,&kL_h,sizeof(double));
+	cudaMemcpyToSymbol(wL,&wL_h,sizeof(double));
+
+	cudaMemcpyToSymbol(sigma_p,&sigma_p_h,sizeof(double));
+
+	cudaMemcpyToSymbol(lamR,&lamR_h,sizeof(double));
+	cudaMemcpyToSymbol(kR,&kR_h,sizeof(double));
+	cudaMemcpyToSymbol(wR,&wR_h,sizeof(double));
+
+	cudaMemcpyToSymbol(E0L,&E0L_h,sizeof(double));
+	cudaMemcpyToSymbol(D,&D_h,sizeof(double));
+	cudaMemcpyToSymbol(zimp,&zimp_h,sizeof(double));
+	cudaMemcpyToSymbol(sigmaL,&sigmaL_h,sizeof(double));
+
+	cudaMemcpyToSymbol(damping,&damping_h,sizeof(double));
+	cudaMemcpyToSymbol(Delta,&Delta_h,sizeof(double));
+	cudaMemcpyToSymbol(kmin,&kmin_h,sizeof(double));
+	cudaMemcpyToSymbol(kmax,&kmax_h,sizeof(double));
+	cudaMemcpyToSymbol(V,&V_h,sizeof(double));
+
+	cudaMemcpyToSymbol(dt,&dt_h,sizeof(double));
+
+	/* Polarization modes allocation (in CONSTANT memory) */
+	for(int i=0;i<Ne;i++){
+		xi_h[i]=i*2.0*pi_h/Ne;
+	}
+
+	cudaMemcpyToSymbol(xi,xi_h,Ne*sizeof(double));
+
+	/*float elapsedTime; // Variables to record execution times
+	cudaEvent_t start,stop;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);*/
+
+	double *k_d,*theta_d,*phi_d;
+	double *eta_d;
+	double *angles_d;
+	double *init_d; // Vectors in Device (d indicates device allocation)
+	double *v_init_d;
+	double *screen_d;
+
+	printf("Number of particles (N): %d\n",N);
+	if(hbar_h>0.0){
+		printf("Quantum version of the KD effect: Trajectories OFF\n");
+		printf("Number of particles (N): %d\n",N);
+		printf("Number of k-modes (Nk): %d\n",Nk);
+		printf("Number of polarizations (Ne): %d\n",Ne);
+		printf("Delta=%2.6e rad/s\n",Delta_h);
+		printf("kmin=%2.6e 1/m\n",kmin_h);
+		printf("kmax=%2.6e 1/m\n",kmax_h);
+		printf("Vk=%2.6e 1/m^3\n",Vk_h);
+		printf("V=%2.6e m^3\n",V_h);
+		printf("sigmaL=%2.6e um\n",sigmaL_h);
+		printf("sigmap=%2.6e kg*m/s\n",sigma_p_h);
+	}else{
+		printf("Classical version of the KD effect: Trajectories OFF\n");
+		printf("Number of particles (N): %d\n",N);
+		printf("Number of k-modes (Nk): %d\n",Nk);
+		printf("Number of polarizations (Ne): %d\n",Ne);
+	}
+	printf("wL=%2.6e rad/s\n",wR_h);
+	printf("IL=%2.6e V/m\n",IL);
+	printf("E0L=%2.6e V/m\n",E0L_h);
+	printf("dt=%2.6e s\n",dt_h);
+	printf("Threads per block: %d\n",TPB);
+	printf("Number of blocks (k-modes): %d\n",blocks);
+
+	cudaMalloc((void**)&k_d,Nk*sizeof(double));
+	cudaMalloc((void**)&theta_d,Nk*sizeof(double));
+	cudaMalloc((void**)&phi_d,Nk*sizeof(double));
+
+	cudaMalloc((void**)&eta_d,Nk*sizeof(double));
+
+	cudaMalloc((void**)&angles_d,3*Nk*sizeof(double));
+
+	cudaMalloc((void**)&init_d,N*sizeof(double));
+
+	cudaMalloc((void**)&v_init_d,N*sizeof(double));
+
+	cudaMalloc((void**)&screen_d,3*N*sizeof(double));
+
+	/* Randomly generated k-modes inside the spherical shell */
+
+	//cudaEventRecord(start,0);
+
+	curandState *devStates_kmodes;
+        cudaMalloc(&devStates_kmodes,Nk*sizeof(curandState));
+
+	//k
+	srand(time(0));
+	int seed=rand(); //Setting up the seeds
+	setup_kmodes<<<blocks,TPB>>>(devStates_kmodes,seed);
+
+	kmodes<<<blocks,TPB>>>(k_d,devStates_kmodes,1,Nk);
+
+	//theta
+	kmodes<<<blocks,TPB>>>(theta_d,devStates_kmodes,2,Nk);
+
+	//phi
+	kmodes<<<blocks,TPB>>>(phi_d,devStates_kmodes,3,Nk);
+
+	cudaMemcpy(k_h,k_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
+	cudaMemcpy(theta_h,theta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
+	cudaMemcpy(phi_h,phi_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
+
+	/*cudaEventRecord(stop,0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsedTime,start,stop);
+	printf("Random k-modes succesfully generated in %6.4f ms\n",elapsedTime);*/
+
+	/* Randomly generated phases for the CPC modes */
+
+	//cudaEventRecord(start,0);
+
+	curandState *devStates_eta;
+	cudaMalloc(&devStates_eta,Nk*sizeof(curandState));
+
+	blocks=(Nk+TPB-1)/TPB;
+	printf("Number of blocks (phases): %d\n",blocks);
+
+	//eta
+	srand(time(NULL));
+	seed=rand(); //Settin up seeds
+	setup_kmodes<<<blocks,TPB>>>(devStates_eta,seed);
+
+	kmodes<<<blocks,TPB>>>(eta_d,devStates_eta,6,Nk);
+
+	cudaMemcpy(eta_h,eta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
+
+	/*cudaEventRecord(stop,0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsedTime,start,stop);
+	printf("Random ZPF phases succesfully generated in %6.4f ms\n",elapsedTime);*/
+
+	/* Making a single vector for theta, phi and eta (reduces the size of memory, one double pointer instead of three) */
+	
+	for(int i=0;i<Nk;i++){
+		angles_h[i]=theta_h[i];
+		angles_h[Nk+i]=phi_h[i];
+		angles_h[2*Nk+i]=eta_h[i];
+		//angles_h[3*Nk+i]=eta_h[i+Nk];
+	}
+
+	cudaFree(theta_d);
+	cudaFree(phi_d);
+	cudaFree(eta_d);
+
+	cudaMemcpy(angles_d,angles_h,3*Nk*sizeof(double),cudaMemcpyHostToDevice);
+
+	/* Initial positions and transverse momentum*/
+
+	//cudaEventRecord(start,0);
+
+	curandState *devStates_init;
+	cudaMalloc(&devStates_init,N*sizeof(curandState));
+
+	blocks=(N+TPB-1)/TPB;
+	printf("Number of blocks (paths): %d\n",blocks);
+
+	srand(time(NULL));
+	seed=rand();
+	setup_kmodes<<<blocks,TPB>>>(devStates_init,seed);
+
+	kmodes<<<blocks,TPB>>>(init_d,devStates_init,4,N);
+	cudaMemcpy(init_h,init_d,N*sizeof(double),cudaMemcpyDeviceToHost);
+
+	kmodes<<<blocks,TPB>>>(v_init_d,devStates_init,5,N);
+	cudaMemcpy(v_init_h,v_init_d,N*sizeof(double),cudaMemcpyDeviceToHost);
+
+	/* Making a single vector for the initial and final positions (reduces the size of memory, one double pointer instead of two) */
+
+	for(int i=0;i<N;i++){
+		screen_h[i]=init_h[i];
+		screen_h[N+i]=v_init_h[i];
+		screen_h[2*N+i]=0.0;
+	}
+
+	cudaMemcpy(screen_d,screen_h,3*N*sizeof(double),cudaMemcpyHostToDevice);
+
+	/*cudaEventRecord(stop,0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsedTime,start,stop);
+	printf("Positions vector initialized in %6.4f ms\n",elapsedTime);*/
+
+	//cudaEventRecord(start,0);
+
+	//cudaMemset(dev_count,0,N*sizeof(int));
+
+	//paths_euler<<<blocks,TPB>>>(k_d,angles_d,screen_d);
+	//paths_rk2<<<blocks,TPB>>>(k_d,angles_d,screen_d);
+	paths_rk4<<<blocks,TPB>>>(k_d,angles_d,screen_d);
+
+	/*cudaEventRecord(stop,0);
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&elapsedTime,start,stop);*/
+	//printf("Paths computed using Euler method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
+	//printf("Paths computed using RK2 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
+	printf("Paths computed using RK4 method\n"); //in %6.4f hours\n",elapsedTime*1e-3/3600.0);
+	
+	cudaMemcpy(screen_h,screen_d,3*N*sizeof(double),cudaMemcpyDeviceToHost);
+
+	cudaFree(devStates_kmodes);
+	cudaFree(devStates_eta);
+	cudaFree(devStates_init);
+	cudaFree(k_d);
+	cudaFree(angles_d);
+	cudaFree(init_d);
+	cudaFree(v_init_d);
+	cudaFree(screen_d);
+}
+#endif
 
 __global__ void setup_kmodes(curandState *state,unsigned long seed){
         int idx=threadIdx.x+blockIdx.x*blockDim.x;
@@ -562,7 +844,9 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 		double xn=0.0;
 		double yn=pos[idx];
 		double zn=0.0;
-		my_push_back(xn,yn,zn,idx);
+		if(coq!=0){
+			my_push_back(xn,yn,zn,idx);
+		}
 
 		double vxn=0.0;
 		double vyn=pos[N+idx];
@@ -601,7 +885,9 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 			yn=yn+dt*vyn;
 			__syncthreads();
 			zn=zn+dt*vzn;
-			my_push_back(xn,yn,zn,idx);
+			if(coq!=0){
+				my_push_back(xn,yn,zn,idx);
+			}
 
 			vxn=vxnn[threadIdx.x];
 			vyn=vynn[threadIdx.x];
@@ -626,7 +912,9 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 		double xn=0.0;
 		double yn=pos[idx];
 		double zn=0.0;
-		my_push_back(xn,yn,zn,idx);
+		if(coq!=0){
+			my_push_back(xn,yn,zn,idx);
+		}
 
 		double vxn=0.0;
 		double vyn=pos[N+idx];
@@ -688,8 +976,10 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 			yn=yn+dt*(vyn+vynn)/2.0;
 			__syncthreads();
 			zn=zn+dt*(vzn+vznn)/2.0;
-
-			my_push_back(xn,yn,zn,idx);
+			
+			if(coq!=0){
+				my_push_back(xn,yn,zn,idx);
+			}
 		}
 		__syncthreads();
 		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
@@ -716,8 +1006,9 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 		double xn=0.0;
 		double yn=pos[idx];
 		double zn=0.0;
-
-		my_push_back(xn,yn,zn,idx);
+		if(coq!=0){
+			my_push_back(xn,yn,zn,idx);
+		}
 
 		double vxn=0.0;
 		double vyn=pos[N+idx];;
@@ -865,8 +1156,9 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 			yn=yn+dt*(k1y+2.0*k2y+2.0*k3y+k4y)/6.0;
 			__syncthreads();
 			zn=zn+dt*(k1z+2.0*k2z+2.0*k3z+k4z)/6.0;
-
-			my_push_back(xn,yn,zn,idx);
+			if(coq!=0){
+				my_push_back(xn,yn,zn,idx);
+			}
 
 			__syncthreads();
 			vxn=vxn+dt*(k1vx[threadIdx.x]+2.0*k2vx[threadIdx.x]+2.0*k3vx[threadIdx.x]+k4vx)/6.0;
