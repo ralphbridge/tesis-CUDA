@@ -27,7 +27,7 @@ RK4:	43 4-Byte registers, 72 Bytes of shared memory per thread. 1080Ti =>  62.5%
 #define Nk 1000 // Number of k-modes
 #define Ne 5 // Number of polarizations per k-mode
 
-#define coq 0 // Trajectories ON(1) or OFF(0)
+#define coq 1 // Trajectories ON(1) or OFF(0)
 
 #if coq!=0
 	#define steps 30000
@@ -240,7 +240,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double E0L_h=pow(2.0*IL/(c_h*eps0_h),0.5);
 	double D_h=125e-6;
 	double zimp_h=24e-2+D_h;
-	double sigmaL_h=26e-6;
+	double sigmaL_h=9.8e-6;
 
 	double damping_h=6.245835e-24;
 	double Delta_h=9e7*damping_h*pow(wR_h,2.0);
@@ -286,7 +286,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	/* Polarization modes allocation (in CONSTANT memory) */
 	for(int i=0;i<Ne;i++){
-		xi_h[i]=i*(4.0*pi_h/2.0)/Ne;
+		xi_h[i]=i*2.0*pi_h/Ne;
 	}
 
 	cudaMemcpyToSymbol(xi,xi_h,Ne*sizeof(double));
@@ -303,7 +303,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double *v_init_d;
 	double *screen_d;
 
-	printf("Number of particles (N): %d\n",N);
 	if(hbar_h>0.0){
 		printf("Quantum version of the KD effect: Trajectories ON\n");
 		printf("Number of particles (N): %d\n",N);
@@ -510,7 +509,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaFree(v_init_d);
 	cudaFree(screen_d);
 }
-#else //Classical results
+#else // Trajectories OFF
 void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *angles_h,double *xi_h,double *init_h,double *v_init_h,double *screen_h){
 	unsigned int blocks=(Nk+TPB-1)/TPB;
 
@@ -603,7 +602,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	double *v_init_d;
 	double *screen_d;
 
-	printf("Number of particles (N): %d\n",N);
 	if(hbar_h>0.0){
 		printf("Quantum version of the KD effect: Trajectories OFF\n");
 		printf("Number of particles (N): %d\n",N);
