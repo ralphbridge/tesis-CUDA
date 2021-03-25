@@ -24,10 +24,10 @@ RK4:	43 4-Byte registers, 72 Bytes of shared memory per thread. 1080Ti =>  62.5%
 */
 
 #define N 2000 // Number of electrons
-#define Nk 1000 // Number of k-modes
-#define Ne 5 // Number of polarizations per k-mode
+#define Nk 5000 // Number of k-modes
+//#define Ne 5 // Number of polarizations per k-mode
 
-#define coq 1 // Trajectories ON(1) or OFF(0)
+#define coq 0 // Trajectories ON(1) or OFF(0)
 
 #if coq!=0
 	#define steps 30000
@@ -68,7 +68,7 @@ __constant__ double V; // Estimated total volume of space
 
 __constant__ double dt; // time step necessary to resolve the electron trajectory
 
-__constant__ double xi[Ne]; // Polarization angles for each k-mode (Ne in total): NOT random, allocated in CONSTANT memory for optimization purposes
+__constant__ double xi[Nk]; // Polarization angles (one for each k-mode, Nk in total): Random, allocated in CONSTANT memory for optimization purposes
 
 void onHost();
 void onDevice(double *k,double *theta,double *phi,double *eta,double *angles,double *xi,double *init,double *v_init,double *screen);
@@ -79,10 +79,10 @@ __global__ void paths_euler(double *k,double *angles,double *pos);
 __global__ void paths_rk2(double *k,double *angles,double *pos);
 __global__ void paths_rk4(double *k,double *angles,double *pos);
 
-__device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz);
-__device__ double g(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz);
+__device__ double f(double const &k,double const &theta,double const &phi,double const &eta1,double const &eta2,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz);
+__device__ double g(double const &k,double const &theta,double const &phi,double const &eta1,double const &eta2,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz);
 __device__ double gL(double const &t,double const &y,double const &z,double const &vz);
-__device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy);
+__device__ double h(double const &k,double const &theta,double const &phi,double const &eta1,double const &eta2,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy);
 __device__ double hL(double const &t,double const &y,double const &z,double const &vy);
 
 __device__ unsigned int dev_count[N];
@@ -167,11 +167,11 @@ void onHost(){
 	theta_h=(double*)malloc(Nk*sizeof(double));
 	phi_h=(double*)malloc(Nk*sizeof(double));
 
-	eta_h=(double*)malloc(Nk*sizeof(double));
+	eta_h=(double*)malloc(2*Nk*sizeof(double));
 
-	angles_h=(double*)malloc(3*Nk*sizeof(double));
+	angles_h=(double*)malloc(5*Nk*sizeof(double));
 
-	xi_h=(double*)malloc(Ne*sizeof(double));
+	xi_h=(double*)malloc(Nk*sizeof(double));
 
 	init_h=(double*)malloc(N*sizeof(double));
 
@@ -183,7 +183,7 @@ void onHost(){
 
 	k_vec=fopen(filename_k,"w");
 	for(int i=0;i<Nk;i++){
-		fprintf(k_vec,"%2.8e,%f,%f,%f\n",k_h[i],angles_h[i],angles_h[Nk+i],angles_h[2*Nk+i]);
+		fprintf(k_vec,"%2.8e,%f,%f,%f,%f,%f\n",k_h[i],angles_h[i],angles_h[Nk+i],angles_h[2*Nk+i],angles_h[3*Nk+i],angles_h[4*Nk+i]);
 	}
 	fclose(k_vec);
 
@@ -284,20 +284,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpyToSymbol(dt,&dt_h,sizeof(double));
 
-	/* Polarization modes allocation (in CONSTANT memory) */
-	for(int i=0;i<Ne;i++){
-		xi_h[i]=i*2.0*pi_h/Ne;
-	}
-
-	cudaMemcpyToSymbol(xi,xi_h,Ne*sizeof(double));
-
-	/*float elapsedTime; // Variables to record execution times
-	cudaEvent_t start,stop;
-	cudaEventCreate(&start);
-	cudaEventCreate(&stop);*/
-
 	double *k_d,*theta_d,*phi_d;
-	double *eta_d;
+	double *eta_d,*xi_d;
 	double *angles_d;
 	double *init_d; // Vectors in Device (d indicates device allocation)
 	double *v_init_d;
@@ -307,7 +295,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 		printf("Quantum version of the KD effect: Trajectories ON\n");
 		printf("Number of particles (N): %d\n",N);
 		printf("Number of k-modes (Nk): %d\n",Nk);
-		printf("Number of polarizations (Ne): %d\n",Ne);
 		printf("Delta=%2.6e rad/s\n",Delta_h);
 		printf("kmin=%2.6e 1/m\n",kmin_h);
 		printf("kmax=%2.6e 1/m\n",kmax_h);
@@ -319,7 +306,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 		printf("Classical version of the KD effect: Trajectories ON\n");
 		printf("Number of particles (N): %d\n",N);
 		printf("Number of k-modes (Nk): %d\n",Nk);
-		printf("Number of polarizations (Ne): %d\n",Ne);
 	}
 	printf("wL=%2.6e rad/s\n",wR_h);
 	printf("IL=%2.6e V/m\n",IL);
@@ -328,14 +314,15 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	printf("Threads per block: %d\n",TPB);
 	printf("Number of blocks (k-modes): %d\n",blocks);
 
-
 	cudaMalloc((void**)&k_d,Nk*sizeof(double));
 	cudaMalloc((void**)&theta_d,Nk*sizeof(double));
 	cudaMalloc((void**)&phi_d,Nk*sizeof(double));
 
-	cudaMalloc((void**)&eta_d,Nk*sizeof(double));
+	cudaMalloc((void**)&eta_d,2*Nk*sizeof(double));
 
-	cudaMalloc((void**)&angles_d,3*Nk*sizeof(double));
+	cudaMalloc((void**)&xi_d,Nk*sizeof(double));
+
+	cudaMalloc((void**)&angles_d,5*Nk*sizeof(double));
 
 	cudaMalloc((void**)&init_d,N*sizeof(double));
 
@@ -344,8 +331,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaMalloc((void**)&screen_d,3*N*sizeof(double));
 
 	/* Randomly generated k-modes inside the spherical shell */
-
-	//cudaEventRecord(start,0);
 
 	curandState *devStates_kmodes;
         cudaMalloc(&devStates_kmodes,Nk*sizeof(curandState));
@@ -367,34 +352,41 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaMemcpy(theta_h,theta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 	cudaMemcpy(phi_h,phi_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 
-	/*cudaEventRecord(stop,0);
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsedTime,start,stop);
-	printf("Random k-modes succesfully generated in %6.4f ms\n",elapsedTime);*/
-
 	/* Randomly generated phases for the CPC modes */
 
-	//cudaEventRecord(start,0);
-
 	curandState *devStates_eta;
-	cudaMalloc(&devStates_eta,Nk*sizeof(curandState));
+	cudaMalloc(&devStates_eta,2*Nk*sizeof(curandState));
 
-	blocks=(Nk+TPB-1)/TPB;
+	blocks=(2*Nk+TPB-1)/TPB;
 	printf("Number of blocks (phases): %d\n",blocks);
 
 	//eta
 	srand(time(NULL));
-	seed=rand(); //Settin up seeds
+	seed=rand(); //Setting up seeds
 	setup_kmodes<<<blocks,TPB>>>(devStates_eta,seed);
 
 	kmodes<<<blocks,TPB>>>(eta_d,devStates_eta,6,Nk);
 
-	cudaMemcpy(eta_h,eta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
+	cudaMemcpy(eta_h,eta_d,2*Nk*sizeof(double),cudaMemcpyDeviceToHost);
 
-	/*cudaEventRecord(stop,0);
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsedTime,start,stop);
-	printf("Random ZPF phases succesfully generated in %6.4f ms\n",elapsedTime);*/
+	blocks=(Nk+TPB-1)/TPB;
+
+	// xi
+	/*curandState *devStates_xi;
+	cudaMalloc(&devStates_xi,Nk*sizeof(curandState));
+
+	blocks=(Nk+TPB-1)/TPB;
+	printf("Number of blocks (polarizations): %d\n",blocks);
+
+	srand(time(NULL));
+	seed=rand(); //Setting up seeds
+	setup_kmodes<<<blocks,TPB>>>(devStates_xi,seed);*/
+
+	kmodes<<<blocks,TPB>>>(xi_d,devStates_eta,6,Nk);
+
+	cudaMemcpy(xi_h,xi_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
+
+	cudaMemcpyToSymbol(xi,xi_h,Nk*sizeof(double));
 
 	/* Making a single vector for theta, phi and eta (reduces the size of memory, one double pointer instead of three) */
 	
@@ -402,18 +394,18 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 		angles_h[i]=theta_h[i];
 		angles_h[Nk+i]=phi_h[i];
 		angles_h[2*Nk+i]=eta_h[i];
-		//angles_h[3*Nk+i]=eta_h[i+Nk];
+		angles_h[3*Nk+i]=eta_h[i+Nk];
+		angles_h[4*Nk+i]=xi_h[i+Nk];
 	}
 
 	cudaFree(theta_d);
 	cudaFree(phi_d);
 	cudaFree(eta_d);
+	cudaFree(xi_d);
 
-	cudaMemcpy(angles_d,angles_h,3*Nk*sizeof(double),cudaMemcpyHostToDevice);
+	cudaMemcpy(angles_d,angles_h,5*Nk*sizeof(double),cudaMemcpyHostToDevice);
 
 	/* Initial positions and transverse momentum*/
-
-	//cudaEventRecord(start,0);
 
 	curandState *devStates_init;
 	cudaMalloc(&devStates_init,N*sizeof(curandState));
@@ -441,15 +433,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpy(screen_d,screen_h,3*N*sizeof(double),cudaMemcpyHostToDevice);
 
-	/*cudaEventRecord(stop,0);
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsedTime,start,stop);
-	printf("Positions vector initialized in %6.4f ms\n",elapsedTime);*/
-
-	//cudaEventRecord(start,0);
-
 	int dsize[N];
-	//cudaMemset(dev_count,0,N*sizeof(int));
 
 	//paths_euler<<<blocks,TPB>>>(k_d,angles_d,screen_d);
 	//paths_rk2<<<blocks,TPB>>>(k_d,angles_d,screen_d);
@@ -465,9 +449,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaMemcpy(screen_h,screen_d,3*N*sizeof(double),cudaMemcpyDeviceToHost);
 
 	cudaMemcpyFromSymbol(&dsize,dev_count,N*sizeof(int));
-	/*for(unsigned int i=0;i<N;i++){
-		printf("Max index: %i for thread %i\n",dsize[i],i);
-	}*/
 
 	int dsizes=3*steps*N;
 
@@ -477,9 +458,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	}
 	std::vector<double> results(dsizes);
 	cudaMemcpyFromSymbol(&(results[0]),dev_traj,dsizes*sizeof(double));
-
-	//std::vector<double>::iterator newIter=std::remove_if(results.begin(),results.end(),isZero);
-	//results.resize(newIter-results.begin());
 
 	time_t t=time(0);   // get time now
 	struct tm *now=localtime(&t);
@@ -503,6 +481,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaFree(devStates_kmodes);
 	cudaFree(devStates_eta);
 	cudaFree(devStates_init);
+	//cudaFree(devStates_xi);
 	cudaFree(k_d);
 	cudaFree(angles_d);
 	cudaFree(init_d);
@@ -583,20 +562,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpyToSymbol(dt,&dt_h,sizeof(double));
 
-	/* Polarization modes allocation (in CONSTANT memory) */
-	for(int i=0;i<Ne;i++){
-		xi_h[i]=i*2.0*pi_h/Ne;
-	}
-
-	cudaMemcpyToSymbol(xi,xi_h,Ne*sizeof(double));
-
-	/*float elapsedTime; // Variables to record execution times
-	cudaEvent_t start,stop;
-	cudaEventCreate(&start);
-	cudaEventCreate(&stop);*/
-
 	double *k_d,*theta_d,*phi_d;
-	double *eta_d;
+	double *eta_d,*xi_d;
 	double *angles_d;
 	double *init_d; // Vectors in Device (d indicates device allocation)
 	double *v_init_d;
@@ -606,7 +573,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 		printf("Quantum version of the KD effect: Trajectories OFF\n");
 		printf("Number of particles (N): %d\n",N);
 		printf("Number of k-modes (Nk): %d\n",Nk);
-		printf("Number of polarizations (Ne): %d\n",Ne);
 		printf("Delta=%2.6e rad/s\n",Delta_h);
 		printf("kmin=%2.6e 1/m\n",kmin_h);
 		printf("kmax=%2.6e 1/m\n",kmax_h);
@@ -618,7 +584,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 		printf("Classical version of the KD effect: Trajectories OFF\n");
 		printf("Number of particles (N): %d\n",N);
 		printf("Number of k-modes (Nk): %d\n",Nk);
-		printf("Number of polarizations (Ne): %d\n",Ne);
 	}
 	printf("wL=%2.6e rad/s\n",wR_h);
 	printf("IL=%2.6e V/m\n",IL);
@@ -631,9 +596,11 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaMalloc((void**)&theta_d,Nk*sizeof(double));
 	cudaMalloc((void**)&phi_d,Nk*sizeof(double));
 
-	cudaMalloc((void**)&eta_d,Nk*sizeof(double));
+	cudaMalloc((void**)&eta_d,2*Nk*sizeof(double));
 
-	cudaMalloc((void**)&angles_d,3*Nk*sizeof(double));
+	cudaMalloc((void**)&xi_d,Nk*sizeof(double));
+
+	cudaMalloc((void**)&angles_d,5*Nk*sizeof(double));
 
 	cudaMalloc((void**)&init_d,N*sizeof(double));
 
@@ -665,34 +632,44 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaMemcpy(theta_h,theta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 	cudaMemcpy(phi_h,phi_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
 
-	/*cudaEventRecord(stop,0);
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsedTime,start,stop);
-	printf("Random k-modes succesfully generated in %6.4f ms\n",elapsedTime);*/
-
-	/* Randomly generated phases for the CPC modes */
-
 	//cudaEventRecord(start,0);
 
 	curandState *devStates_eta;
-	cudaMalloc(&devStates_eta,Nk*sizeof(curandState));
+	cudaMalloc(&devStates_eta,2*Nk*sizeof(curandState));
 
-	blocks=(Nk+TPB-1)/TPB;
+	blocks=(2*Nk+TPB-1)/TPB;
 	printf("Number of blocks (phases): %d\n",blocks);
 
 	//eta
 	srand(time(NULL));
-	seed=rand(); //Settin up seeds
+	seed=rand(); //Setting up seeds
 	setup_kmodes<<<blocks,TPB>>>(devStates_eta,seed);
 
-	kmodes<<<blocks,TPB>>>(eta_d,devStates_eta,6,Nk);
+	kmodes<<<blocks,TPB>>>(eta_d,devStates_eta,6,2*Nk);
 
-	cudaMemcpy(eta_h,eta_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
+	cudaMemcpy(eta_h,eta_d,2*Nk*sizeof(double),cudaMemcpyDeviceToHost);
 
-	/*cudaEventRecord(stop,0);
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsedTime,start,stop);
-	printf("Random ZPF phases succesfully generated in %6.4f ms\n",elapsedTime);*/
+	blocks=(Nk+TPB-1)/TPB;
+
+	// xi
+	/*curandState *devStates_xi;
+	cudaMalloc(&devStates_xi,Nk*sizeof(curandState));*/
+
+	printf("Number of blocks (polarizations): %d\n",blocks);
+
+	/*srand(time(NULL));
+	seed=rand(); //Settin up seeds
+	setup_kmodes<<<blocks,TPB>>>(devStates_xi,seed);*/
+
+	kmodes<<<blocks,TPB>>>(xi_d,devStates_eta,6,Nk);
+
+	cudaMemcpy(xi_h,xi_d,Nk*sizeof(double),cudaMemcpyDeviceToHost);
+
+	/*for(int i=0;i<Nk;i++){
+		printf("xi[%i]=%f\n",i,xi_h[i]);
+	}*/
+
+	cudaMemcpyToSymbol(xi,xi_h,Nk*sizeof(double));
 
 	/* Making a single vector for theta, phi and eta (reduces the size of memory, one double pointer instead of three) */
 	
@@ -700,14 +677,16 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 		angles_h[i]=theta_h[i];
 		angles_h[Nk+i]=phi_h[i];
 		angles_h[2*Nk+i]=eta_h[i];
-		//angles_h[3*Nk+i]=eta_h[i+Nk];
+		angles_h[3*Nk+i]=eta_h[i+Nk];
+		angles_h[4*Nk+i]=xi_h[i];
 	}
 
 	cudaFree(theta_d);
 	cudaFree(phi_d);
 	cudaFree(eta_d);
+	cudaFree(xi_d);
 
-	cudaMemcpy(angles_d,angles_h,3*Nk*sizeof(double),cudaMemcpyHostToDevice);
+	cudaMemcpy(angles_d,angles_h,5*Nk*sizeof(double),cudaMemcpyHostToDevice);
 
 	/* Initial positions and transverse momentum*/
 
@@ -763,6 +742,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaFree(devStates_kmodes);
 	cudaFree(devStates_eta);
+	//cudaFree(devStates_xi);
 	cudaFree(devStates_init);
 	cudaFree(k_d);
 	cudaFree(angles_d);
@@ -857,30 +837,35 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 			vznn[threadIdx.x]=0.0;
 
 			for(int i=0;i<Nk;i++){
-				for(int j=0;j<Ne;j++){
-					__syncthreads();
-					vxnn[threadIdx.x]=vxnn[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // vxnn represents here the total ZPF force in x (recycled variable)
-					__syncthreads();
-					vynn[threadIdx.x]=vynn[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
-					__syncthreads();
-					vznn[threadIdx.x]=vznn[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
-				}
+				__syncthreads();
+				vxnn[threadIdx.x]=vxnn[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn,yn,zn,vyn,vzn); // vxnn represents here the total ZPF force in x (recycled variable)
+				__syncthreads();
+				vynn[threadIdx.x]=vynn[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
+				
+				__syncthreads();
+				vznn[threadIdx.x]=vznn[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
 			}
 			vynn[threadIdx.x]=vynn[threadIdx.x]+gL(tn,yn,zn,vzn);
 			vznn[threadIdx.x]=vznn[threadIdx.x]+hL(tn,yn,zn,vyn);
 
 			__syncthreads();
 			vxnn[threadIdx.x]=vxn+dt*vxnn[threadIdx.x];
+
 			__syncthreads();
 			vynn[threadIdx.x]=vyn+dt*vynn[threadIdx.x];
+
 			__syncthreads();
 			vznn[threadIdx.x]=vzn+dt*vznn[threadIdx.x];
+
 			__syncthreads();
 			tn=tn+dt;
+
 			__syncthreads();
 			xn=xn+dt*vxn;
+
 			__syncthreads();
 			yn=yn+dt*vyn;
+
 			__syncthreads();
 			zn=zn+dt*vzn;
 			if(coq!=0){
@@ -932,32 +917,33 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 			k2vz[threadIdx.x]=0.0;
 
 			for(int i=0;i<Nk;i++){
-				for(int j=0;j<Ne;j++){
-					__syncthreads();
-					k1vx[threadIdx.x]=k1vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k1vx represents here the total ZPF force in x
-					__syncthreads();
-					k1vy[threadIdx.x]=k1vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
-					__syncthreads();
-					k1vz[threadIdx.x]=k1vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
-				}
+				__syncthreads();
+				k1vx[threadIdx.x]=k1vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn,yn,zn,vyn,vzn); // k1vx represents here the total ZPF force in x
+				
+				__syncthreads();
+				k1vy[threadIdx.x]=k1vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
+				
+				__syncthreads();
+				k1vz[threadIdx.x]=k1vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
 			}
 
 			k1vy[threadIdx.x]=k1vy[threadIdx.x]+gL(tn,yn,zn,vzn); // Laser contribution to the total force in y
 			k1vz[threadIdx.x]=k1vz[threadIdx.x]+hL(tn,yn,zn,vyn); // Laser contribution to the total force in z
 
 			for(int i=0;i<Nk;i++){
-				for(int j=0;j<Ne;j++){
-					__syncthreads();
-					k2vx[threadIdx.x]=k2vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vyn+dt*k1vy[threadIdx.x],vzn+dt*k1vz[threadIdx.x]); // k2vx represents here the total ZPF force in x
-					__syncthreads();
-					k2vy[threadIdx.x]=k2vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vxn+dt*k1vx[threadIdx.x],vzn+dt*k1vz[threadIdx.x]); // k2vy represents here the total ZPF force in y
-					__syncthreads();
-					k2vz[threadIdx.x]=k2vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vxn+dt*k1vx[threadIdx.x],vyn+dt*k1vy[threadIdx.x]); // k2vz represents here the total ZPF force in z
-				}
+				__syncthreads();
+				k2vx[threadIdx.x]=k2vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vyn+dt*k1vy[threadIdx.x],vzn+dt*k1vz[threadIdx.x]); // k2vx represents here the total ZPF force in x
+				
+				__syncthreads();
+				k2vy[threadIdx.x]=k2vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vxn+dt*k1vx[threadIdx.x],vzn+dt*k1vz[threadIdx.x]); // k2vy represents here the total ZPF force in y
+				
+				__syncthreads();
+				k2vz[threadIdx.x]=k2vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn+dt,xn+dt*vxn,yn+dt*vyn,zn+dt*vzn,vxn+dt*k1vx[threadIdx.x],vyn+dt*k1vy[threadIdx.x]); // k2vz represents here the total ZPF force in z
 			}
 
 			__syncthreads();
 			k2vy[threadIdx.x]=k2vy[threadIdx.x]+gL(tn+dt,yn+dt*vyn,zn+dt*vzn,vzn+dt*k1vz[threadIdx.x]); // Laser contribution to the total force in y
+
 			__syncthreads();
 			k2vz[threadIdx.x]=k2vz[threadIdx.x]+hL(tn+dt,yn+dt*vyn,zn+dt*vzn,vyn+dt*k1vy[threadIdx.x]); // Laser contribution to the total force in z
 
@@ -1067,17 +1053,18 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 			k4vz=0.0;
 
 			for(int i=0;i<Nk;i++){ // k1
-				for(int j=0;i<Ne;i++){
-					__syncthreads();
-					k1vx[threadIdx.x]=k1vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vyn,vzn); // k1vx represents here the total ZPF force in x
-					__syncthreads();
-					k1vy[threadIdx.x]=k1vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
-					__syncthreads();
-					k1vz[threadIdx.x]=k1vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
-				}
+				__syncthreads();
+				k1vx[threadIdx.x]=k1vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn,yn,zn,vyn,vzn); // k1vx represents here the total ZPF force in x
+
+				__syncthreads();
+				k1vy[threadIdx.x]=k1vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn,yn,zn,vxn,vzn); // k1vy represents here the total ZPF force in y
+
+				__syncthreads();
+				k1vz[threadIdx.x]=k1vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn,yn,zn,vxn,vyn); // k1vz represents here the total ZPF force in z
 			}
 			__syncthreads();
 			k1vy[threadIdx.x]=k1vy[threadIdx.x]+gL(tn,yn,zn,vzn); // Laser contribution to the total force in y
+
 			__syncthreads();
 			k1vz[threadIdx.x]=k1vz[threadIdx.x]+hL(tn,yn,zn,vyn); // Laser contribution to the total force in z
 
@@ -1089,39 +1076,43 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 			k1z=vzn;
 			
 			for(int i=0;i<Nk;i++){ // k2
-				for(int j=0;j<Ne;j++){
-					__syncthreads();
-					k2vx[threadIdx.x]=k2vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k1x/2.0,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vyn+dt*k1vy[threadIdx.x]/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // k2vx represents here the total force in x
-					__syncthreads();
-					k2vy[threadIdx.x]=k2vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k1x/2.0,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vxn+dt*k1vx[threadIdx.x]/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // k2vy represents here the total force in y
-					__syncthreads();
-					k2vz[threadIdx.x]=k2vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k1x/2.0,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vxn+dt*k1vx[threadIdx.x]/2.0,vyn+dt*k1vy[threadIdx.x]/2.0); // k2vz represents here the total force in z
-				}
+				__syncthreads();
+				k2vx[threadIdx.x]=k2vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn+dt*k1x/2.0,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vyn+dt*k1vy[threadIdx.x]/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // k2vx represents here the total force in x
+
+				__syncthreads();
+				k2vy[threadIdx.x]=k2vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn+dt*k1x/2.0,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vxn+dt*k1vx[threadIdx.x]/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // k2vy represents here the total force in y
+
+				__syncthreads();
+				k2vz[threadIdx.x]=k2vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn+dt*k1x/2.0,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vxn+dt*k1vx[threadIdx.x]/2.0,vyn+dt*k1vy[threadIdx.x]/2.0); // k2vz represents here the total force in z
 			}
 			__syncthreads();
 			k2vy[threadIdx.x]=k2vy[threadIdx.x]+gL(tn,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vzn+dt*k1vz[threadIdx.x]/2.0); // Laser contribution to the total force in y
+
 			__syncthreads();
 			k2vz[threadIdx.x]=k2vz[threadIdx.x]+hL(tn,yn+dt*k1y/2.0,zn+dt*k1z/2.0,vyn+dt*k1vy[threadIdx.x]/2.0); // Laser contribution to the total force in z
 
 			__syncthreads();
 			k2x=vxn+dt*k1vx[threadIdx.x]/2.0;
+
 			__syncthreads();
 			k2y=vyn+dt*k1vy[threadIdx.x]/2.0;
+
 			__syncthreads();
 			k2z=vzn+dt*k1vz[threadIdx.x]/2.0;
 
 			for(int i=0;i<Nk;i++){ // k3
-				for(int j=0;j<Ne;j++){
-					__syncthreads();
-					k3vx[threadIdx.x]=k3vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k2x/2.0,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vyn+dt*k2vy[threadIdx.x]/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // k3vx represents here the total force in x
-					__syncthreads();
-					k3vy[threadIdx.x]=k3vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k2x/2.0,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vxn+dt*k2vx[threadIdx.x]/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // k3vy represents here the total force in y
-					__syncthreads();
-					k3vz[threadIdx.x]=k3vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k2x/2.0,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vxn+dt*k2vx[threadIdx.x]/2.0,vyn+dt*k2vy[threadIdx.x]/2.0); // k3vz represents here the total force in z
-				}
+				__syncthreads();
+				k3vx[threadIdx.x]=k3vx[threadIdx.x]+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn+dt*k2x/2.0,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vyn+dt*k2vy[threadIdx.x]/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // k3vx represents here the total force in x
+
+				__syncthreads();
+				k3vy[threadIdx.x]=k3vy[threadIdx.x]+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn+dt*k2x/2.0,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vxn+dt*k2vx[threadIdx.x]/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // k3vy represents here the total force in y
+
+				__syncthreads();
+				k3vz[threadIdx.x]=k3vz[threadIdx.x]+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn+dt*k2x/2.0,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vxn+dt*k2vx[threadIdx.x]/2.0,vyn+dt*k2vy[threadIdx.x]/2.0); // k3vz represents here the total force in z
 			}
 			__syncthreads();
 			k3vy[threadIdx.x]=k3vy[threadIdx.x]+gL(tn,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vzn+dt*k2vz[threadIdx.x]/2.0); // Laser contribution to the total force in y
+
 			__syncthreads();
 			k3vz[threadIdx.x]=k3vz[threadIdx.x]+hL(tn,yn+dt*k2y/2.0,zn+dt*k2z/2.0,vyn+dt*k2vy[threadIdx.x]/2.0); // Laser contribution to the total force in z
 
@@ -1130,38 +1121,46 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 
 			__syncthreads();
 			k3x=vxn+dt*k2vx[threadIdx.x]/2.0;
+
 			__syncthreads();
 			k3y=vyn+dt*k2vy[threadIdx.x]/2.0;
+
 			__syncthreads();
 			k3z=vzn+dt*k2vz[threadIdx.x]/2.0;
 
 			for(int i=0;i<Nk;i++){ // k4
-				for(int j=0;j<Ne;j++){
-					__syncthreads();
-					k4vx=k4vx+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vyn+dt*k3vy[threadIdx.x],vzn+dt*k3vz[threadIdx.x]); // k4vx represents here the total force in x
-					__syncthreads();
-					k4vy=k4vy+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vxn+dt*k3vx[threadIdx.x],vzn+dt*k3vz[threadIdx.x]); // k4vy represents here the total force in y
-					__syncthreads();
-					k4vz=k4vz+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],xi[j],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vxn+dt*k3vx[threadIdx.x],vyn+dt*k3vy[threadIdx.x]); // k4vz represents here the total force in z
-				}
+				__syncthreads();
+				k4vx=k4vx+f(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vyn+dt*k3vy[threadIdx.x],vzn+dt*k3vz[threadIdx.x]); // k4vx represents here the total force in x
+
+				__syncthreads();
+				k4vy=k4vy+g(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vxn+dt*k3vx[threadIdx.x],vzn+dt*k3vz[threadIdx.x]); // k4vy represents here the total force in y
+
+				__syncthreads();
+				k4vz=k4vz+h(k[i],angles[i],angles[Nk+i],angles[2*Nk+i],angles[3*Nk+i],xi[i],tn,xn+dt*k3x,yn+dt*k3y,zn+dt*k3z,vxn+dt*k3vx[threadIdx.x],vyn+dt*k3vy[threadIdx.x]); // k4vz represents here the total force in z
 			}
+			__syncthreads();
 			k4vy=k4vy+gL(tn,yn+dt*k3y,zn+dt*k3z,vzn+dt*k3vz[threadIdx.x]); // Laser contribution to the total force in y
+
+			__syncthreads();
 			k4vz=k4vz+hL(tn,yn+dt*k3y,zn+dt*k3z,vyn+dt*k3vy[threadIdx.x]); // Laser contribution to the total force in z
 
 			__syncthreads();
 			xn=xn+dt*(k1x+2.0*k2x+2.0*k3x+k4x)/6.0;
+
 			__syncthreads();
 			yn=yn+dt*(k1y+2.0*k2y+2.0*k3y+k4y)/6.0;
+
 			__syncthreads();
 			zn=zn+dt*(k1z+2.0*k2z+2.0*k3z+k4z)/6.0;
 			if(coq!=0){
 				my_push_back(xn,yn,zn,idx);
 			}
-
 			__syncthreads();
 			vxn=vxn+dt*(k1vx[threadIdx.x]+2.0*k2vx[threadIdx.x]+2.0*k3vx[threadIdx.x]+k4vx)/6.0;
+
 			__syncthreads();
 			vyn=vyn+dt*(k1vy[threadIdx.x]+2.0*k2vy[threadIdx.x]+2.0*k3vy[threadIdx.x]+k4vy)/6.0;
+
 			__syncthreads();
 			vzn=vzn+dt*(k1vz[threadIdx.x]+2.0*k2vz[threadIdx.x]+2.0*k3vz[threadIdx.x]+k4vz)/6.0;
 		}
@@ -1169,20 +1168,23 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
 	}
 }
-__device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component (Wayne-Herman version)
+__device__ double f(double const &k,double const &theta,double const &phi,double const &eta1,double const &eta2,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component (Wayne-Herman version)
 	__syncthreads();
 	double w=k*c;
 
+	/*__syncthreads();
+	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z);
 	__syncthreads();
-	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z);*/
 	__syncthreads();
-	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	double alpha=k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z);
 
 	__syncthreads();
 	double E0=sqrt(hbar*w/(eps0*V));
 
 	__syncthreads();
-	return q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*cos(phi)*cos(xi)-sin(phi)*sin(xi))/m+q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vy+(cos(theta)*sin(phi)*sin(xi)-cos(phi)*cos(xi))*vz)/(m*c);
+//	return q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*cos(phi)*cos(xi)-sin(phi)*sin(xi))/m+q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vy+(cos(theta)*sin(phi)*sin(xi)-cos(phi)*cos(xi))*vz)/(m*c);
+	return 2*q*E0*cos(alpha)*(cos(theta)*cos(phi)*(cos(w*t+eta1)*cos(xi)-cos(w*t+eta2)*sin(xi))-sin(phi)*(cos(w*t+eta1)*sin(xi)+cos(w*t+eta2)*cos(xi)))+2*q*E0*sin(alpha)*(sin(theta)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vy+cos(theta)*sin(phi)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vz-cos(phi)*(sin(w*t+eta1)*cos(xi)-sin(w*t+eta2)*sin(xi))*vz)/(m*c);
 }
 
 /*
@@ -1242,20 +1244,24 @@ __device__ double f(double const &k,double const &theta,double const &phi,double
 }
 */
 
-__device__ double g(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (Wayne-Herman version)
+__device__ double g(double const &k,double const &theta,double const &phi,double const &eta1,double const &eta2,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (Wayne-Herman version)
 	__syncthreads();
 	double w=k*c;
 
-	__syncthreads();
+	/*__syncthreads();
 	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
 	__syncthreads();
-	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;*/
+	__syncthreads();
+	double alpha=k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z);
 
 	__syncthreads();
 	double E0=sqrt(hbar*w/(eps0*V));
 
+	/*__syncthreads();
+	return q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*sin(phi)*cos(xi)+cos(phi)*sin(xi))/m-q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vx+(cos(theta)*cos(phi)*sin(xi)+sin(phi)*cos(xi))*vz)/(m*c);*/
 	__syncthreads();
-	return q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*sin(phi)*cos(xi)+cos(phi)*sin(xi))/m-q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vx+(cos(theta)*cos(phi)*sin(xi)+sin(phi)*cos(xi))*vz)/(m*c);
+	return 2*q*E0*cos(alpha)*(cos(theta)*sin(phi)*(cos(w*t+eta1)*cos(xi)-cos(w*t+eta2)*sin(xi))+cos(phi)*(cos(w*t+eta1)*sin(xi)+cos(w*t+eta2)*cos(xi)))-2*q*E0*sin(alpha)*(sin(theta)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vx+cos(theta)*cos(phi)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vz+sin(phi)*(sin(w*t+eta1)*cos(xi)-sin(w*t+eta2)*sin(xi))*vz)/(m*c);
 }
 
 /*
@@ -1327,20 +1333,24 @@ __device__ double gL(double const &t,double const &y,double const &z,double cons
 	return q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
 }
 
-__device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component (Wayne-Herman version)
+__device__ double h(double const &k,double const &theta,double const &phi,double const &eta1,double const &eta2,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component (Wayne-Herman version)
 	__syncthreads();
 	double w=k*c;
 
-	__syncthreads();
+	/*__syncthreads();
 	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
 	__syncthreads();
-	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
+	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;*/
+	__syncthreads();
+	double alpha=k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z);
 	
 	__syncthreads();
 	double E0=sqrt(hbar*w/(eps0*V));
 
+	/*__syncthreads();
+	return -q*E0*(cos(phi1)+cos(phi2))*(sin(theta)*cos(xi))/m+q*E0*(cos(phi1)-cos(phi2))*((cos(phi)*cos(xi)-cos(theta)*sin(phi)*sin(xi))*vx+(sin(phi)*cos(xi)+cos(theta)*cos(phi)*sin(xi))*vy)/(m*c);*/
 	__syncthreads();
-	return -q*E0*(cos(phi1)+cos(phi2))*(sin(theta)*cos(xi))/m+q*E0*(cos(phi1)-cos(phi2))*((cos(phi)*cos(xi)-cos(theta)*sin(phi)*sin(xi))*vx+(sin(phi)*cos(xi)+cos(theta)*cos(phi)*sin(xi))*vy)/(m*c);
+	return 2*q*E0*cos(alpha)*(sin(theta)*(-cos(w*t+eta1)*cos(xi)+cos(w*t+eta2)*sin(xi)))+2*q*E0*sin(alpha)*(-cos(theta)*sin(phi)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vx+cos(phi)*(sin(w*t+eta1)*cos(xi)-sin(w*t+eta2)*sin(xi))*vx+cos(theta)*cos(phi)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vy+sin(phi)*(sin(w*t+eta1)*cos(xi)-sin(w*t+eta2)*sin(xi))*vy)/(m*c);
 }
 
 /*
