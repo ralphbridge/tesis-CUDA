@@ -23,15 +23,14 @@ RK4:	43 4-Byte registers, 72 Bytes of shared memory per thread. 1080Ti =>  62.5%
 ********************************************************************************
 */
 
-#define N 2000 // Number of electrons
+#define N 1000 // Number of electrons
 #define Nk 5000 // Number of k-modes
-//#define Ne 5 // Number of polarizations per k-mode
 
-#define coq 0 // Trajectories ON(1) or OFF(0)
+#define coq 1 // Trajectories ON(1) or OFF(0)
 
 #if coq!=0
 	#define steps 30000
-	__device__ double dev_traj[3*steps*N]; // Record single paths (quantum only)
+	__device__ double dev_traj[6*steps*N]; // Record single paths (quantum only)
 #else
 	#define steps 1
 	__device__ double dev_traj[1];
@@ -87,31 +86,20 @@ __device__ double hL(double const &t,double const &y,double const &z,double cons
 
 __device__ unsigned int dev_count[N];
 
-__device__ void my_push_back(double const &x,double const &y, double const &z,int const &idx){
+__device__ void my_push_back(double const &x,double const &y,double const &z,double const &vx,double const &vy,double const &vz,int const &idx){
 	if(dev_count[idx]<steps){
-		/*if(z==0){
-			printf("Initial index: %i for thread %i\n",dev_count[idx],idx);
-		}*/
-		dev_traj[3*steps*idx+3*dev_count[idx]]=x;
-		dev_traj[3*steps*idx+3*dev_count[idx]+1]=y;
-		dev_traj[3*steps*idx+3*dev_count[idx]+2]=z;
-//		return dev_count[idx];
-		//__syncthreads();
-		//if(idx==0){
-			dev_count[idx]=dev_count[idx]+1;
-		//}
-		/*if(z>D){
-			printf("Index offset: %i for thread %i\n",3*steps*idx,idx);
-			printf("Max index: %i for thread %i with y=%f\n",dev_count[idx],idx,y);
-		}*/
+		dev_traj[6*steps*idx+6*dev_count[idx]]=x;
+		dev_traj[6*steps*idx+6*dev_count[idx]+1]=y;
+		dev_traj[6*steps*idx+6*dev_count[idx]+2]=z;
+		dev_traj[6*steps*idx+6*dev_count[idx]+3]=vx;
+		dev_traj[6*steps*idx+6*dev_count[idx]+4]=vy;
+		dev_traj[6*steps*idx+6*dev_count[idx]+5]=vz;
+		//dev_traj[7*steps*idx+7*dev_count[idx]+6]=idx;
+		dev_count[idx]=dev_count[idx]+1;
 	}else{
-		printf("Overflow error hijole\n");
+		printf("Overflow error (in pushback)\n");
 	}
 }
-
-/*bool isZero(int i){
-	return i==0;
-}*/
 
 int main(){
 	onHost();
@@ -372,15 +360,7 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	blocks=(Nk+TPB-1)/TPB;
 
 	// xi
-	/*curandState *devStates_xi;
-	cudaMalloc(&devStates_xi,Nk*sizeof(curandState));
-
-	blocks=(Nk+TPB-1)/TPB;
 	printf("Number of blocks (polarizations): %d\n",blocks);
-
-	srand(time(NULL));
-	seed=rand(); //Setting up seeds
-	setup_kmodes<<<blocks,TPB>>>(devStates_xi,seed);*/
 
 	kmodes<<<blocks,TPB>>>(xi_d,devStates_eta,6,Nk);
 
@@ -439,9 +419,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	//paths_rk2<<<blocks,TPB>>>(k_d,angles_d,screen_d);
 	paths_rk4<<<blocks,TPB>>>(k_d,angles_d,screen_d);
 
-	/*cudaEventRecord(stop,0);
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsedTime,start,stop);*/
 	//printf("Paths computed using Euler method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	//printf("Paths computed using RK2 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	printf("Paths computed using RK4 method\n"); //in %6.4f hours\n",elapsedTime*1e-3/3600.0);
@@ -450,9 +427,9 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpyFromSymbol(&dsize,dev_count,N*sizeof(int));
 
-	int dsizes=3*steps*N;
+	int dsizes=6*steps*N;
 
-	if(dsizes>3*steps*N){
+	if(dsizes>6*steps*N){
 		printf("Overflow error\n");
 		abort();
 	}
@@ -469,9 +446,9 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	myfile.open(filename_t);
 
 	if(myfile.is_open()){
-		for(unsigned i=0;i<results.size()-1;i=i+3){
+		for(unsigned i=0;i<results.size()-1;i=i+6){
 			if(results[i]+results[i+1]!=0){
-				myfile << std::scientific << results[i] << ',' << results[i+1] << ',' << results[i+2] << '\n';
+				myfile << std::scientific << results[i] << ',' << results[i+1] << ',' << results[i+2]  << ',' << results[i+3]  << ',' << results[i+4]  << ',' << results[i+5] << '\n';
 			}
 		}
 		std::cout << '\n';
@@ -481,7 +458,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	cudaFree(devStates_kmodes);
 	cudaFree(devStates_eta);
 	cudaFree(devStates_init);
-	//cudaFree(devStates_xi);
 	cudaFree(k_d);
 	cudaFree(angles_d);
 	cudaFree(init_d);
@@ -652,14 +628,8 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 	blocks=(Nk+TPB-1)/TPB;
 
 	// xi
-	/*curandState *devStates_xi;
-	cudaMalloc(&devStates_xi,Nk*sizeof(curandState));*/
 
 	printf("Number of blocks (polarizations): %d\n",blocks);
-
-	/*srand(time(NULL));
-	seed=rand(); //Settin up seeds
-	setup_kmodes<<<blocks,TPB>>>(devStates_xi,seed);*/
 
 	kmodes<<<blocks,TPB>>>(xi_d,devStates_eta,6,Nk);
 
@@ -718,22 +688,10 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaMemcpy(screen_d,screen_h,3*N*sizeof(double),cudaMemcpyHostToDevice);
 
-	/*cudaEventRecord(stop,0);
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsedTime,start,stop);
-	printf("Positions vector initialized in %6.4f ms\n",elapsedTime);*/
-
-	//cudaEventRecord(start,0);
-
-	//cudaMemset(dev_count,0,N*sizeof(int));
-
 	//paths_euler<<<blocks,TPB>>>(k_d,angles_d,screen_d);
 	//paths_rk2<<<blocks,TPB>>>(k_d,angles_d,screen_d);
 	paths_rk4<<<blocks,TPB>>>(k_d,angles_d,screen_d);
 
-	/*cudaEventRecord(stop,0);
-	cudaEventSynchronize(stop);
-	cudaEventElapsedTime(&elapsedTime,start,stop);*/
 	//printf("Paths computed using Euler method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	//printf("Paths computed using RK2 method in %6.4f hours\n",elapsedTime*1e-3/3600.0);
 	printf("Paths computed using RK4 method\n"); //in %6.4f hours\n",elapsedTime*1e-3/3600.0);
@@ -742,7 +700,6 @@ void onDevice(double *k_h,double *theta_h,double *phi_h,double *eta_h,double *an
 
 	cudaFree(devStates_kmodes);
 	cudaFree(devStates_eta);
-	//cudaFree(devStates_xi);
 	cudaFree(devStates_init);
 	cudaFree(k_d);
 	cudaFree(angles_d);
@@ -762,48 +719,16 @@ __global__ void kmodes(double *vec,curandState *globalState,int opt,int n){
 	curandState localState=globalState[idx];
 	if(idx<n){
 		if(opt==1){ // Random radii
-			/*
-			if(idx==0){
-				vec[idx]=kL/2.0;
-			}else if(idx==1){
-				vec[idx]=kL;
-			}else if(idx==2){
-				vec[idx]=3.0*kL/2.0;
-			}else{
-				vec[idx]=pow((pow(kmax,3.0)-pow(kmin,3.0))*curand_uniform(&localState)+pow(kmin,3.0),1.0/3.0);
-			}
-			*/
 			vec[idx]=pow((pow(kmax,3.0)-pow(kmin,3.0))*curand_uniform(&localState)+pow(kmin,3.0),1.0/3.0);
 		}else if(opt==2){ // Random polar angles
-			/*
-			if(idx==0||idx==1||idx==2){
-				vec[idx]=pi/2.0;
-			}else{
-				vec[idx]=acos(1.0-2.0*curand_uniform(&localState));
-			}
-			*/
 			vec[idx]=acos(1.0-2.0*curand_uniform(&localState));
 		}else if(opt==3){ // Random azimuthal angles
-			/*
-			if(idx==0||idx==1||idx==2){
-				vec[idx]=pi/2.0;
-			}else{
-				vec[idx]=2.0*pi*curand_uniform(&localState);
-			}
-			*/
 			vec[idx]=2.0*pi*curand_uniform(&localState);
 		}else if(opt==4){
 			vec[idx]=sigma*curand_normal(&localState); // Random initial positions
 		}else if(opt==5){
 			vec[idx]=sigma_p*curand_normal(&localState); // Random initial transverse momentum
 		}else if(opt==6){
-			/*
-			if(idx==0||idx==1||idx==2){
-				vec[idx]=0.001;
-			}else{
-				vec[idx]=2.0*pi*curand_uniform(&localState); // Random constant phases
-			}
-			*/
 			vec[idx]=2.0*pi*curand_uniform(&localState);
 		}
 		globalState[idx]=localState; // Update current seed state
@@ -822,14 +747,15 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 		double xn=0.0;
 		double yn=pos[idx];
 		double zn=0.0;
-		if(coq!=0){
-			my_push_back(xn,yn,zn,idx);
-		}
 
 		double vxn=0.0;
 		double vyn=pos[N+idx];
 		__syncthreads();
 		double vzn=v0;
+
+		if(coq!=0){
+			my_push_back(xn,yn,zn,vxn,vyn,vzn,idx);
+		}
 
 		while(zn<=D){
 			vxnn[threadIdx.x]=0.0;
@@ -868,13 +794,15 @@ __global__ void paths_euler(double *k,double *angles,double *pos){
 
 			__syncthreads();
 			zn=zn+dt*vzn;
-			if(coq!=0){
-				my_push_back(xn,yn,zn,idx);
-			}
-
+		
 			vxn=vxnn[threadIdx.x];
 			vyn=vynn[threadIdx.x];
 			vzn=vznn[threadIdx.x];
+
+			if(coq!=0){
+				my_push_back(xn,yn,zn,vxn,vyn,vzn,idx);
+			}
+
 		}
 		__syncthreads();
 		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
@@ -895,14 +823,15 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 		double xn=0.0;
 		double yn=pos[idx];
 		double zn=0.0;
-		if(coq!=0){
-			my_push_back(xn,yn,zn,idx);
-		}
-
+		
 		double vxn=0.0;
 		double vyn=pos[N+idx];
 		__syncthreads();
 		double vzn=v0;
+
+		if(coq!=0){
+			my_push_back(xn,yn,zn,vxn,vyn,vzn,idx);
+		}
 
 		double vxnn=0.0;
 		double vynn=0.0;
@@ -962,7 +891,7 @@ __global__ void paths_rk2(double *k,double *angles,double *pos){
 			zn=zn+dt*(vzn+vznn)/2.0;
 			
 			if(coq!=0){
-				my_push_back(xn,yn,zn,idx);
+				my_push_back(xn,yn,zn,vxnn,vynn,vznn,idx);
 			}
 		}
 		__syncthreads();
@@ -990,14 +919,15 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 		double xn=0.0;
 		double yn=pos[idx];
 		double zn=0.0;
-		if(coq!=0){
-			my_push_back(xn,yn,zn,idx);
-		}
 
 		double vxn=0.0;
 		double vyn=pos[N+idx];;
 		__syncthreads();
 		double vzn=v0;
+
+		if(coq!=0){
+			my_push_back(xn,yn,zn,vxn,vyn,vzn,idx);
+		}
 
 		double k1x;
 		double k1y;
@@ -1152,9 +1082,7 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 
 			__syncthreads();
 			zn=zn+dt*(k1z+2.0*k2z+2.0*k3z+k4z)/6.0;
-			if(coq!=0){
-				my_push_back(xn,yn,zn,idx);
-			}
+
 			__syncthreads();
 			vxn=vxn+dt*(k1vx[threadIdx.x]+2.0*k2vx[threadIdx.x]+2.0*k3vx[threadIdx.x]+k4vx)/6.0;
 
@@ -1163,6 +1091,10 @@ __global__ void paths_rk4(double *k,double *angles,double *pos){
 
 			__syncthreads();
 			vzn=vzn+dt*(k1vz[threadIdx.x]+2.0*k2vz[threadIdx.x]+2.0*k3vz[threadIdx.x]+k4vz)/6.0;
+
+			if(coq!=0){
+				my_push_back(xn,yn,zn,vxn,vyn,vzn,idx);
+			}
 		}
 		__syncthreads();
 		pos[2*N+idx]=yn+(zimp-D)*vyn/vzn;
@@ -1172,10 +1104,6 @@ __device__ double f(double const &k,double const &theta,double const &phi,double
 	__syncthreads();
 	double w=k*c;
 
-	/*__syncthreads();
-	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z);
-	__syncthreads();
-	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z);*/
 	__syncthreads();
 	double alpha=k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z);
 
@@ -1183,143 +1111,23 @@ __device__ double f(double const &k,double const &theta,double const &phi,double
 	double E0=sqrt(hbar*w/(eps0*V));
 
 	__syncthreads();
-//	return q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*cos(phi)*cos(xi)-sin(phi)*sin(xi))/m+q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vy+(cos(theta)*sin(phi)*sin(xi)-cos(phi)*cos(xi))*vz)/(m*c);
 	return 2*q*E0*cos(alpha)*(cos(theta)*cos(phi)*(cos(w*t+eta1)*cos(xi)-cos(w*t+eta2)*sin(xi))-sin(phi)*(cos(w*t+eta1)*sin(xi)+cos(w*t+eta2)*cos(xi)))+2*q*E0*sin(alpha)*(sin(theta)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vy+cos(theta)*sin(phi)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vz-cos(phi)*(sin(w*t+eta1)*cos(xi)-sin(w*t+eta2)*sin(xi))*vz)/(m*c);
 }
-
-/*
-__device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component (WH+multiple Fourier modes)
-	__syncthreads();
-	double w=k*c;
-
-	__syncthreads();
-	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-	__syncthreads();
-	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-
-	double E0;
-	if(k==kR/2.0){
-		__syncthreads();
-		E0=sqrt(2.0/(3.0*pi))*E0L;
-	}else if(k==kR){
-		__syncthreads();
-		E0=sqrt(1.0/2.0)*E0L;
-	}else if(k==3.0*kR/2.0){
-		__syncthreads();
-		E0=sqrt(6.0/(5.0*pi))*E0L;
-	}else{
-		__syncthreads();
-		E0=sqrt(hbar*w/(eps0*V));
-	}
-	return 0.0;
-}
-*/
-/*
-__device__ double f(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vy,double const &vz){ // ZPF, x-component (Single explicit Fourier mode)
-	__syncthreads();
-	double w=k*c;
-
-	__syncthreads();
-	double phi1=w*t-k*y+eta;
-	__syncthreads();
-	double phi2=w*t+k*y+eta;
-
-	double E0;
-	if(k==kR/2.0){
-		__syncthreads();
-		E0=sqrt(2.0/(3.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
-	}else if(k==kR){
-		__syncthreads();
-		E0=sqrt(1.0/2.0)*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
-	}else if(k==3.0*kR/2.0){
-		__syncthreads();
-		E0=sqrt(6.0/(5.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
-	}else{
-		__syncthreads();
-		E0=sqrt(hbar*w/(eps0*V));
-	}
-	//__syncthreads();
-	//return q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vy+(cos(theta)*sin(phi)*sin(xi)-cos(phi)*cos(xi))*vz)/(m*c);
-	return 0.0;
-}
-*/
 
 __device__ double g(double const &k,double const &theta,double const &phi,double const &eta1,double const &eta2,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (Wayne-Herman version)
 	__syncthreads();
 	double w=k*c;
 
-	/*__syncthreads();
-	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-	__syncthreads();
-	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;*/
 	__syncthreads();
 	double alpha=k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z);
 
 	__syncthreads();
 	double E0=sqrt(hbar*w/(eps0*V));
 
-	/*__syncthreads();
-	return q*E0*(cos(phi1)+cos(phi2))*(cos(theta)*sin(phi)*cos(xi)+cos(phi)*sin(xi))/m-q*E0*(cos(phi1)-cos(phi2))*(sin(theta)*sin(xi)*vx+(cos(theta)*cos(phi)*sin(xi)+sin(phi)*cos(xi))*vz)/(m*c);*/
 	__syncthreads();
 	return 2*q*E0*cos(alpha)*(cos(theta)*sin(phi)*(cos(w*t+eta1)*cos(xi)-cos(w*t+eta2)*sin(xi))+cos(phi)*(cos(w*t+eta1)*sin(xi)+cos(w*t+eta2)*cos(xi)))-2*q*E0*sin(alpha)*(sin(theta)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vx+cos(theta)*cos(phi)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vz+sin(phi)*(sin(w*t+eta1)*cos(xi)-sin(w*t+eta2)*sin(xi))*vz)/(m*c);
 }
 
-/*
-__device__ double g(double &kv,double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (WH+multiple Fourier modes)
-	__syncthreads();
-	double w=k*c;
-
-	__syncthreads();
-	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-	__syncthreads();
-	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-
-	double E0;
-	if(k==kR/2.0){
-		__syncthreads();
-		E0=sqrt(2.0/(3.0*pi))*E0L;
-	}else if(k==kR){
-		__syncthreads();
-		E0=(1.0/sqrt(2.0))*E0L;
-	}else if(k==3.0*kR/2.0){
-		__syncthreads();
-		E0=sqrt(6.0/(5.0*pi))*E0L;
-	}else{
-		__syncthreads();
-		E0=sqrt(hbar*w/(eps0*V));
-	}
-	__syncthreads();
-	return -q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
-}
-*/
-/*
-__device__ double g(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vz){ // ZPF, y-component (Single explicit Fourier mode)
-	__syncthreads();
-	double w=k*c;
-
-	__syncthreads();
-	double phi1=w*t-k*y+eta;
-	__syncthreads();
-	double phi2=w*t+k*y+eta;
-
-	double E0;
-	if(k==kR/2.0){
-		__syncthreads();
-		E0=sqrt(2.0/(3.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
-	}else if(k==kR){
-		__syncthreads();
-		E0=sqrt(1.0/2.0)*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
-	}else if(k==3.0*kR/2.0){
-		__syncthreads();
-		E0=sqrt(6.0/(5.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
-	}else{
-		__syncthreads();
-		E0=sqrt(hbar*w/(eps0*V));
-	}
-	__syncthreads();
-	return -q*E0*(cos(phi1)-cos(phi2))*vz/(m*c);
-}
-*/
 __device__ double gL(double const &t,double const &y,double const &z,double const &vz){ // Laser region, y-component
 	__syncthreads();
 	double phi1=wL*t-kL*y;
@@ -1337,80 +1145,16 @@ __device__ double h(double const &k,double const &theta,double const &phi,double
 	__syncthreads();
 	double w=k*c;
 
-	/*__syncthreads();
-	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-	__syncthreads();
-	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;*/
 	__syncthreads();
 	double alpha=k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z);
 	
 	__syncthreads();
 	double E0=sqrt(hbar*w/(eps0*V));
 
-	/*__syncthreads();
-	return -q*E0*(cos(phi1)+cos(phi2))*(sin(theta)*cos(xi))/m+q*E0*(cos(phi1)-cos(phi2))*((cos(phi)*cos(xi)-cos(theta)*sin(phi)*sin(xi))*vx+(sin(phi)*cos(xi)+cos(theta)*cos(phi)*sin(xi))*vy)/(m*c);*/
 	__syncthreads();
 	return 2*q*E0*cos(alpha)*(sin(theta)*(-cos(w*t+eta1)*cos(xi)+cos(w*t+eta2)*sin(xi)))+2*q*E0*sin(alpha)*(-cos(theta)*sin(phi)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vx+cos(phi)*(sin(w*t+eta1)*cos(xi)-sin(w*t+eta2)*sin(xi))*vx+cos(theta)*cos(phi)*(sin(w*t+eta1)*sin(xi)+sin(w*t+eta2)*cos(xi))*vy+sin(phi)*(sin(w*t+eta1)*cos(xi)-sin(w*t+eta2)*sin(xi))*vy)/(m*c);
 }
 
-/*
-__device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component (WH+multiple Fourier modes)
-	__syncthreads();
-	double w=k*c;
-
-	__syncthreads();
-	double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-	__syncthreads();
-	double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-	
-	double E0
-	if(k==kR/2.0){
-		__syncthreads();
-		E0=sqrt(2.0/(3.0*pi))*E0L;
-	}else if(k==kR){
-		__syncthreads();
-		E0=(1/sqrt(2.0))*E0L;
-	}else if(k==3.0*kR/2.0){
-		__syncthreads();
-		E0=sqrt(6.0/(5.0*pi))*E0L;
-	}else{
-		__syncthreads();
-		E0=sqrt(hbar*w/(eps0*V));
-	}
-	__syncthreads();
-	return -q*E0*(cos(phi1)+cos(phi2))/m+q*E0*(cos(phi1)-cos(phi2))*vy/(m*c);
-}
-*/
-/*
-__device__ double h(double const &k,double const &theta,double const &phi,double const &eta,double &xi,double const &t,double const &x,double const &y,double const &z,double const &vx,double const &vy){ // ZPF, z-component (Single explicit Fourier mode)
-	__syncthreads();
-	double w=k*c;
-
-	__syncthreads();
-	//double phi1=w*t-k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-	double phi1=w*t-k*y+eta;
-	__syncthreads();
-	//double phi2=w*t+k*(sin(theta)*cos(phi)*x+sin(theta)*sin(phi)*y+cos(theta)*z)+eta;
-	double phi2=w*t+k*y+eta;
-	
-	double E0;
-	if(k==kR/2.0){
-		__syncthreads();
-		E0=sqrt(2.0/(3.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
-	}else if(k==kR){
-		__syncthreads();
-		E0=sqrt(1.0/2.0)*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
-	}else if(k==3.0*kR/2.0){
-		__syncthreads();
-		E0=sqrt(6.0/(5.0*pi))*E0L*exp(-pow(z-D/2.0,2.0)/(2.0*pow(sigmaL,2.0)));
-	}else{
-		__syncthreads();
-		E0=sqrt(hbar*w/(eps0*V));
-	}
-	__syncthreads();
-	return -q*E0*(cos(phi1)+cos(phi2))/m+q*E0*(cos(phi1)-cos(phi2))*vy/(m*c);
-}
-*/
 __device__ double hL(double const &t,double const &y,double const &z,double const &vy){ // Laser region, z-component
 	__syncthreads();
 	double phi1=wL*t-kL*y;
